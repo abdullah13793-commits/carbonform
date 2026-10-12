@@ -2,6 +2,7 @@
 
 python src/make_video.py full    -> publish/carbonform_story_1080p.mp4   (1920x1080, dashboard visible)
 python src/make_video.py cinema  -> publish/carbonform_story_4x5.mp4     (1080x1350, LinkedIn feed)
+python src/make_video.py hq      -> publish/carbonform_story_4k.mp4      (3840x2160, dashboard text readable after re-encoding)
 python src/make_video.py still <out.png> <w> <h> <json-design> [cinema]    -> single frame
 """
 import json, subprocess, sys, time
@@ -32,19 +33,21 @@ STORY = [
 
 
 def run(mode, out):
-    w, h = (1920, 1080) if mode == "full" else (1080, 1350)
+    # hq: 1600x900 CSS layout at 2.4x pixel density -> 3840x2160 frames, larger and sharper dashboard text
+    w, h, dpr = {"full": (1920, 1080, 1), "hq": (1600, 900, 2.4)}.get(mode, (1080, 1350, 1))
     frames_dir = ROOT / f"renders/frames_{mode}"
     frames_dir.mkdir(parents=True, exist_ok=True)
     for p in frames_dir.glob("*.jpg"):
         p.unlink()
     with sync_playwright() as pw:
         b = pw.chromium.launch(channel="msedge", headless=True, args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
-        pg = b.new_page(viewport={"width": w, "height": h}, device_scale_factor=1)
+        pg = b.new_page(viewport={"width": w, "height": h}, device_scale_factor=dpr)
         pg.goto((ROOT / "docs/index.html").as_uri())
         pg.wait_for_function("window.CFApp !== undefined", timeout=60000)
         pg.evaluate("document.fonts.ready")
-        pg.evaluate(f"CFApp.layout('{'cinema' if mode != 'full' else 'full'}'); CFApp.startCapture(); CFApp.setRotateSpeed(1.1)")
-        pg.evaluate("CFApp.orbit(0.5, 0.28); CFApp.frame(%s, true)" % ("0.82" if mode == "full" else "0.70"))
+        cinema = mode == "cinema"
+        pg.evaluate(f"CFApp.layout('{'cinema' if cinema else 'full'}'); CFApp.startCapture(); CFApp.setRotateSpeed(1.1)")
+        pg.evaluate("CFApp.orbit(0.5, 0.28); CFApp.frame(%s, true)" % ("0.70" if cinema else "0.82"))
         n = 0
         t0 = time.time()
         for patch, cap, secs in STORY:
@@ -63,7 +66,7 @@ def run(mode, out):
             print(f"  segment done: {text}  ({n} frames, {time.time() - t0:.0f}s)", flush=True)
         b.close()
     cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-framerate", str(FPS), "-i", str(frames_dir / "%05d.jpg"),
-           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "21", "-preset", "slow", "-movflags", "+faststart", str(out)]
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18" if mode == "hq" else "21", "-preset", "slow", "-movflags", "+faststart", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
     print("video ->", out, round(Path(out).stat().st_size / 1e6, 1), "MB")
 
@@ -90,6 +93,6 @@ if __name__ == "__main__":
     if m == "still":
         still(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), json.loads(sys.argv[5]), len(sys.argv) > 6 and sys.argv[6] == "cinema")
     else:
-        out = ROOT / ("publish/carbonform_story_1080p.mp4" if m == "full" else "publish/carbonform_story_4x5.mp4")
+        out = ROOT / {"full": "publish/carbonform_story_1080p.mp4", "hq": "publish/carbonform_story_4k.mp4"}.get(m, "publish/carbonform_story_4x5.mp4")
         out.parent.mkdir(exist_ok=True)
         run(m, out)
