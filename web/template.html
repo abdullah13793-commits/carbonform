@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CarbonForm</title>
+<meta name="description" content="Shape a building, swap its materials and watch its whole-life carbon update live against the Danish BR18 2025 limit.">
+<meta property="og:title" content="CarbonForm: parametric building LCA">
+<meta property="og:description" content="Live whole-life carbon (EN 15978, BR18 2025) for a parametric apartment block, with LCAbyg export.">
+<meta property="og:image" content="preview.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed 3D stage; a control rail on the left, the carbon dashboard on the right; stacks on phones. */
+:root {
+  --bg: #0b0d0c; --panel: rgba(17,20,19,.86); --panel-solid: #121514; --line: #2a302d; --ink: #f2f4ef; --ink2: #b9c0b8; --muted: #7d867e;
+  --accent: #b7f36a; --p1: #3987e5; --p2: #d95926; --p3: #199e70; --p4: #c98500; --p5: #9085e9;
+  --good: #0ca30c; --bad: #e5484d; --warn: #fab219;
+  --f-ui: "Archivo", "Segoe UI", system-ui, sans-serif; --f-data: "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--f-ui); overflow: hidden }
+#stage { position: fixed; inset: 0 }
+canvas#gl { width: 100%; height: 100%; display: block; touch-action: none }
+.rail { position: fixed; top: 16px; bottom: 16px; width: 300px; background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line);
+        border-radius: 14px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin }
+.left { left: 16px } .right { right: 16px; width: 360px }
+.rail > * { flex-shrink: 0 }                       /* keep charts at their natural height; the rail scrolls instead */
+.brand { display: flex; align-items: baseline; justify-content: space-between }
+.brand h1 { font-weight: 800; font-size: 22px; margin: 0; letter-spacing: -.02em }
+.brand h1 span { color: var(--accent) }
+.tag { font: 500 10.5px var(--f-data); color: var(--muted); letter-spacing: .08em; text-transform: uppercase }
+.grp { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line) }
+.grp > .t { font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+.seg { display: flex; flex-wrap: wrap; gap: 4px }
+.seg button { flex: 1 1 auto; min-width: 0; font: 500 12px var(--f-ui); color: var(--ink2); background: transparent; border: 1px solid var(--line);
+              border-radius: 7px; padding: 6px 7px; cursor: pointer; white-space: nowrap }
+.seg button:hover { color: var(--ink); border-color: var(--muted) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #0b0d0c; border-color: var(--ink) }
+.sl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 12.5px; color: var(--ink2) }
+.sl output { font: 500 12px var(--f-data); color: var(--ink) }
+.sl input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent) }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.btn { font: 600 13px var(--f-ui); border-radius: 9px; padding: 10px; border: 1px solid var(--line); background: #1b201e; color: var(--ink); cursor: pointer }
+.btn.primary { background: var(--accent); color: #0b0d0c; border-color: var(--accent) }
+.btn:hover { filter: brightness(1.1) }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.hero { display: grid; gap: 4px }
+.hero .lab { font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+.hero .num { font: 800 54px/1 var(--f-ui); letter-spacing: -.03em; font-variant-numeric: tabular-nums }
+.hero .num small { font: 500 14px var(--f-data); color: var(--ink2); letter-spacing: 0; margin-left: 6px }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--f-data); padding: 4px 9px; border-radius: 999px; width: max-content }
+.chip.ok { background: rgba(12,163,12,.16); color: #8fe58f } .chip.no { background: rgba(229,72,77,.18); color: #ffb1b3 }
+svg text { font-family: var(--f-data); fill: var(--ink2) }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 12.5px; color: var(--ink2) }
+.kv b { font: 500 12.5px var(--f-data); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--ink2) }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px }
+.caption { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); max-width: min(720px, calc(100vw - 720px)); text-align: center;
+           font: 600 clamp(15px, 1.6vw, 22px)/1.3 var(--f-ui); text-shadow: 0 2px 18px #000; pointer-events: none; opacity: 0; transition: opacity .6s }
+.caption.on { opacity: 1 }
+.cloudtag { position: fixed; font: 600 12px var(--f-data); color: var(--ink); background: rgba(0,0,0,.55); padding: 5px 9px; border-radius: 6px;
+            pointer-events: none; transform: translate(-50%, -100%); white-space: nowrap }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: #0b0d0c; font: 500 12px var(--f-data); padding: 5px 8px; border-radius: 6px; z-index: 9 }
+details summary { cursor: pointer; font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums }
+td { padding: 4px 2px; border-bottom: 1px solid var(--line); color: var(--ink2) } td.n { text-align: right; font-family: var(--f-data); color: var(--ink) }
+.foot { font-size: 11px; color: var(--muted); line-height: 1.45 }
+.foot a { color: var(--ink2) }
+@media (max-width: 1100px) {
+  html, body { overflow: auto } #stage { position: relative; height: 62vh }
+  .rail { position: relative; inset: auto; width: auto; margin: 12px 16px; max-height: none }
+  .caption { max-width: 90vw }
+}
+@media (prefers-reduced-motion: reduce) { .caption { transition: none } }
+body.cinema .rail { display: none } body.cinema #stage { position: fixed; height: 100% } body.cinema .caption { max-width: 88vw; bottom: 9% ; font-size: clamp(22px, 3.4vw, 40px) }
+.hud { position: fixed; left: 5%; top: 4%; display: none; gap: 6px; text-shadow: 0 2px 16px #000 }
+body.cinema .hud { display: grid } .hud .k { font: 600 clamp(12px, 1.6vw, 18px) var(--f-data); color: var(--ink2); letter-spacing: .12em; text-transform: uppercase }
+.hud .v { font: 800 clamp(48px, 8vw, 110px)/1 var(--f-ui); letter-spacing: -.03em } .hud .v small { font: 500 .22em var(--f-data); color: var(--ink2); letter-spacing: 0; margin-left: .4em }
+.hud .brandline { font: 800 clamp(18px, 2.4vw, 30px) var(--f-ui) } .hud .brandline span { color: var(--accent) }
+.hud .bar { height: 10px; border-radius: 5px; background: #1d2320; overflow: hidden; width: min(70vw, 520px) } .hud .bar i { display: block; height: 100%; border-radius: 5px }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas></div>
+<div class="cloudtag" id="cloudtag" hidden></div>
+<div class="caption" id="caption"></div>
+<div class="tip" id="tip" hidden></div>
+<div class="hud" id="hud"><div class="brandline">Carbon<span>Form</span></div><div class="k">Whole-life carbon · BR18 2025</div>
+  <div class="v" id="hudv">0.00<small>kg CO₂e/m²/yr</small></div><div class="bar"><i id="hudbar"></i></div><div id="hudchip"></div></div>
+
+<aside class="rail left" aria-label="Design controls">
+  <div class="brand"><h1>Carbon<span>Form</span></h1><span class="tag">BR18 · 2025</span></div>
+  <div class="grp"><div class="t">Project</div><div class="seg" data-k="mode"></div>
+    <div class="sl" id="sl-topUpFloors"></div></div>
+  <div class="grp"><div class="t">Form</div><div class="seg" data-k="footprint"></div>
+    <div class="sl" id="sl-length"></div><div class="sl" id="sl-depth"></div><div class="sl" id="sl-floors"></div>
+    <div class="sl" id="sl-twist"></div><div class="sl" id="sl-setback"></div><div class="sl" id="sl-wwr"></div></div>
+  <div class="grp"><div class="t">Structure</div><div class="seg" data-k="structure"></div></div>
+  <div class="grp"><div class="t">Facade</div><div class="seg" data-k="facade"></div></div>
+  <div class="grp"><div class="t">Insulation</div><div class="seg" data-k="insulation"></div></div>
+  <div class="grp"><div class="t">Windows</div><div class="seg" data-k="windows"></div></div>
+  <div class="grp"><div class="t">Roof &amp; energy</div><div class="seg" data-k="roof"></div><div class="seg" data-k="heating"></div>
+    <div class="sl" id="sl-pv"></div>
+    <div class="seg" data-k="balconies"></div></div>
+  <div class="btns"><button class="btn primary" id="opt" type="button">Find lowest carbon</button><button class="btn" id="story" type="button">Play the story</button>
+    <button class="btn" id="exp" type="button">Export to LCAbyg</button><button class="btn" id="reset" type="button">Reset</button></div>
+  <p class="foot">Data: BR18 annex 2 table 7 (2025) and ÖKOBAUDAT. B6 factors: SBST 2025–2075. Design-stage screening, not a BR18 submission.</p>
+</aside>
+
+<aside class="rail right" aria-label="Carbon dashboard">
+  <div class="hero"><div class="lab">Whole-life carbon · A1–A3, B4, B6, C3–C4</div>
+    <div class="num" id="hero">0.00<small>kg CO₂e/m²/yr</small></div>
+    <div id="chip"></div></div>
+  <svg id="gauge" viewBox="0 0 330 64" width="100%" role="img" aria-label="Result against BR18 limits"></svg>
+  <div class="kv" id="kpis"></div>
+  <div class="grp"><div class="t">Life-cycle modules</div><svg id="mods" viewBox="0 0 330 70" width="100%"></svg>
+    <div class="legend" id="modleg"></div></div>
+  <div class="grp"><div class="t">Where the carbon is</div><svg id="parts" viewBox="0 0 330 150" width="100%"></svg></div>
+  <div class="grp"><div class="t">Keep · renovate · rebuild, 50 years</div><svg id="tl" viewBox="0 0 330 170" width="100%"></svg>
+    <div class="legend" id="tlleg"></div></div>
+  <details><summary>Material passport</summary><table id="pass"></table></details>
+  <p class="foot" id="srcnote"></p>
+</aside>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>/*__ENGINE__*/</script>
+<script>/*__EXPORT__*/</script>
+<script>
+const DB = /*__DB__*/null;
+const CF = window.CarbonForm;
+const $ = s => document.querySelector(s);
+const fmt = (v, d = 2) => v.toLocaleString("en", { minimumFractionDigits: d, maximumFractionDigits: d });
+const MODCOL = { A1A3: "var(--p1)", B4: "var(--p2)", B6: "var(--p3)", C3C4: "var(--p4)" };
+const MODLAB = { A1A3: "Production A1–A3", B4: "Replacements B4", B6: "Operation B6", C3C4: "End of life C3–C4" };
+const PARTCOL = { structure: "#3987e5", foundation: "#256abf", facade: "#d95926", windows: "#199e70", roof: "#c98500",
+                  interior: "#9085e9", installations: "#d55181", balconies: "#5598e7", energy: "#e66767", operation: "#7d867e" };
+const PARTLAB = { structure: "Structure", foundation: "Foundations", facade: "Facade", windows: "Windows", roof: "Roof",
+                  interior: "Interior", installations: "Installations", balconies: "Balconies", energy: "PV", operation: "Operation (B6)" };
+
+// ------------------------------------------------------------------ state + controls
+let design = Object.assign({}, CF.DEFAULT_DESIGN);
+const SLIDERS = {
+  length: [20, 70, 1, "m"], depth: [10, 16, 0.5, "m"], floors: [2, 12, 1, ""], twist: [0, 6, 0.5, "°/floor"],
+  setback: [0, 3, 0.5, "m"], wwr: [0.15, 0.6, 0.01, ""], pv: [0, 1, 0.05, ""], topUpFloors: [0, 4, 1, ""] };
+const SLLAB = { length: "Length", depth: "Wing depth", floors: "Storeys", twist: "Twist", setback: "Top setback", wwr: "Window ratio",
+                pv: "PV roof cover", topUpFloors: "Timber top-up storeys" };
+const SEGS = Object.assign({}, CF.OPTIONS, { balconies: [true, false] });
+const SEGLAB = Object.assign({}, CF.LABELS, { new: "New build", renovate: "Renovate 1970s", keep: "Keep as is", true: "Balconies", false: "No balconies" });
+
+function buildControls() {
+  document.querySelectorAll(".seg").forEach(el => {
+    const k = el.dataset.k;
+    el.innerHTML = "";
+    for (const v of SEGS[k]) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = SEGLAB[v] || v; b.dataset.v = v;
+      b.onclick = () => { set({ [k]: v }); };
+      el.appendChild(b);
+    }
+  });
+  for (const [k, [mn, mx, st, u]] of Object.entries(SLIDERS)) {
+    const el = $("#sl-" + k); if (!el) continue;
+    el.innerHTML = `<label for="in-${k}">${SLLAB[k]}</label><output id="out-${k}"></output>
+      <input id="in-${k}" type="range" min="${mn}" max="${mx}" step="${st}">`;
+    el.querySelector("input").oninput = e => set({ [k]: +e.target.value });
+  }
+}
+function syncControls() {
+  document.querySelectorAll(".seg").forEach(el => {
+    const k = el.dataset.k;
+    el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(design[k]) === b.dataset.v));
+  });
+  for (const k of Object.keys(SLIDERS)) {
+    const i = $("#in-" + k); if (!i) continue;
+    i.value = design[k];
+    const u = SLIDERS[k][3];
+    $("#out-" + k).textContent = (k === "wwr" || k === "pv") ? Math.round(design[k] * 100) + " %" : `${design[k]} ${u}`.trim();
+  }
+  $("#sl-topUpFloors").hidden = design.mode !== "renovate";
+  ["structure"].forEach(k => document.querySelector(`.seg[data-k="${k}"]`).closest(".grp").style.opacity = design.mode === "new" ? 1 : .45);
+}
+
+// ------------------------------------------------------------------ compute + dashboard
+let R = null, S = null;
+function set(patch, quiet) {
+  if (!quiet) autoFrame = true;
+  design = Object.assign({}, design, patch);
+  if (design.mode !== "new") design.footprint = "bar";
+  compute();
+  syncControls();
+  if (!quiet) target = targetFrom(design, R);
+}
+function compute() {
+  R = CF.evaluate(design, DB);
+  S = CF.scenarios(Object.assign({}, design), DB);
+  dash();
+}
+function dash() {
+  const r = R;
+  $("#hero").innerHTML = fmt(r.total) + "<small>kg CO₂e/m²/yr</small>";
+  $("#chip").innerHTML = r.pass ? `<span class="chip ok">✓ Meets BR18 2025 limit (7.5)</span>`
+                                : `<span class="chip no">✕ Above BR18 2025 limit (7.5)</span>`;
+  gauge(r.total);
+  const kp = [
+    ["Floor area", fmt(r.geometry.gfa, 0) + " m²"],
+    ["Construction A4–A5", fmt(r.construction) + (r.passConstruction ? " ✓" : " ✕") + " / 1.5"],
+    ["Up-front carbon A1–A5", fmt(r.upfront_m2, 0) + " kg/m²"],
+    ["Whole life, 50 yr", fmt(r.tonnes, 0) + " t CO₂e"],
+    ["Heating demand", fmt(r.energy.heat_m2, 1) + " kWh/m²/yr"],
+    ["Module D (outside limit)", fmt(r.perM2Yr.D)],
+  ];
+  $("#kpis").innerHTML = kp.map(([a, b]) => `<span>${a}</span><b>${b}</b>`).join("");
+  modules(r); parts(r); timeline(S); passport(r);
+  $("#hudv").innerHTML = fmt(r.total) + "<small>kg CO₂e/m²/yr</small>";
+  $("#hudbar").style.width = Math.min(100, r.total / 12 * 100) + "%"; $("#hudbar").style.background = r.pass ? "var(--good)" : "var(--bad)";
+  $("#hudchip").innerHTML = $("#chip").innerHTML;
+  $("#srcnote").textContent = `${Object.keys(DB.materials).length} datasets · reference period 50 years · per m² floor area`;
+}
+function gauge(v) {
+  const W = 330, x0 = 10, x1 = 320, max = 12;
+  const X = t => x0 + (x1 - x0) * Math.min(t, max) / max;
+  const ticks = [[5.8, "2029", "end", 14], [6.4, "2027", "start", 14], [7.5, "2025 limit 7.5", "middle", 56], [12, "2023", "end", 14]];
+  let s = `<rect x="${x0}" y="26" width="${x1 - x0}" height="10" rx="5" fill="#1d2320"/>`;
+  s += `<rect x="${x0}" y="26" width="${Math.max(10, X(v) - x0)}" height="10" rx="5" fill="${v <= 7.5 ? "var(--good)" : "var(--bad)"}"/>`;
+  for (const [t, l, a, y] of ticks) s += `<line x1="${X(t)}" x2="${X(t)}" y1="20" y2="42" stroke="#f2f4ef" stroke-opacity=".55" stroke-width="1"/>
+    <text x="${X(t) + (a === "end" ? -3 : a === "start" ? 3 : 0)}" y="${y}" text-anchor="${a}" font-size="9.5">${t === 7.5 ? l : l + " · " + t}</text>`;
+  s += `<circle cx="${X(v)}" cy="31" r="6" fill="#f2f4ef" stroke="#0b0d0c" stroke-width="2"/>`;
+  $("#gauge").innerHTML = s;
+}
+function modules(r) {
+  const keys = ["A1A3", "B4", "B6", "C3C4"];
+  const vals = keys.map(k => Math.max(0, r.perM2Yr[k]));
+  const neg = r.perM2Yr.A1A3 < 0 ? r.perM2Yr.A1A3 : 0;
+  const tot = vals.reduce((a, b) => a + b, 0) || 1;
+  const W = 310, x0 = 10;
+  let x = x0, s = "";
+  keys.forEach((k, i) => {
+    const w = Math.max(0, W * vals[i] / Math.max(tot, 1e-9)) - (i < keys.length - 1 ? 2 : 0);
+    if (w > 0.5) s += `<rect data-tip="${MODLAB[k]}: ${fmt(r.perM2Yr[k])} kg/m²/yr" x="${x}" y="14" width="${w}" height="22" rx="${i === 0 || i === 3 ? 4 : 0}" fill="${MODCOL[k]}"/>`;
+    x += w + 2;
+  });
+  if (neg < 0) s += `<text x="10" y="56" font-size="10.5">Stored biogenic carbon in A1–A3: ${fmt(neg)} (released again in C3)</text>`;
+  else s += `<text x="10" y="56" font-size="10.5">Largest: ${MODLAB[keys[vals.indexOf(Math.max(...vals))]]} · ${fmt(Math.max(...vals))}</text>`;
+  $("#mods").innerHTML = s;
+  $("#modleg").innerHTML = keys.map(k => `<span><i style="background:${MODCOL[k]}"></i>${MODLAB[k]} ${fmt(r.perM2Yr[k])}</span>`).join("");
+}
+function parts(r) {
+  const den = r.geometry.gfa * CF.PERIOD;
+  const arr = Object.entries(r.byGroup).map(([k, v]) => [k, v / den]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 7);
+  const mx = Math.max(...arr.map(a => Math.abs(a[1])), 0.01);
+  let s = "";
+  arr.forEach(([k, v], i) => {
+    const y = 6 + i * 20, w = 170 * Math.abs(v) / mx;
+    s += `<text x="0" y="${y + 11}" font-size="11">${PARTLAB[k] || k}</text>
+          <rect data-tip="${PARTLAB[k] || k}: ${fmt(v)} kg/m²/yr" x="${110 + (v < 0 ? 0 : 0)}" y="${y + 2}" width="${Math.max(2, w)}" height="12" rx="4"
+           fill="${PARTCOL[k] || "#7d867e"}" ${v < 0 ? 'opacity=".55"' : ""}/>
+          <text x="${116 + Math.max(2, w)}" y="${y + 11}" font-size="10.5" style="fill:var(--ink)">${fmt(v)}</text>`;
+  });
+  $("#parts").innerHTML = s;
+}
+function timeline(S) {
+  const W = 330, H = 170, l = 34, r = 8, t = 10, b = 22;
+  const lines = [["keep", "Keep 1970s block", "#7d867e"], ["renovate", "Renovate", "#b7f36a"], ["newBuild", "Demolish + new", "#3987e5"]];
+  const all = lines.flatMap(([k]) => S.timelines[k]);
+  const mx = Math.max(...all) * 1.05, mn = Math.min(0, ...all);
+  const X = i => l + (W - l - r) * i / CF.PERIOD, Y = v => t + (H - t - b) * (1 - (v - mn) / (mx - mn));
+  let s = "";
+  const step = niceStep(mx / 4);
+  for (let v = 0; v <= mx; v += step) s += `<line x1="${l}" x2="${W - r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#232926"/>
+      <text x="${l - 4}" y="${Y(v) + 3}" text-anchor="end" font-size="9">${Math.round(v / 1000).toLocaleString("en")}</text>`;
+  for (const yr of [0, 10, 20, 30, 40, 50]) s += `<text x="${X(yr)}" y="${H - 6}" text-anchor="middle" font-size="9">${CF.START_YEAR + yr}</text>`;
+  s += `<text x="2" y="9" font-size="9">t CO₂e</text>`;
+  for (const [k, , c] of lines) {
+    const d = S.timelines[k].map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    s += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = S.timelines[k][CF.PERIOD];
+    s += `<circle cx="${X(CF.PERIOD)}" cy="${Y(last)}" r="4" fill="${c}" stroke="#121514" stroke-width="2" data-tip="${k}: ${Math.round(last / 1000)} t"/>`;
+  }
+  const be = S.breakEvenRenovateVsKeep;
+  if (be) { const right = X(be) > W * 0.6;
+    s += `<line x1="${X(be)}" x2="${X(be)}" y1="${t}" y2="${H - b}" stroke="#b7f36a" stroke-opacity=".5"/>
+     <text x="${X(be) + (right ? -4 : 4)}" y="${t + 10}" text-anchor="${right ? "end" : "start"}" font-size="9.5" style="fill:var(--ink)">renovation below keep from ${CF.START_YEAR + be}</text>`; }
+  $("#tl").innerHTML = s;
+  $("#tlleg").innerHTML = lines.map(([k, lab, c]) => `<span><i style="background:${c}"></i>${lab} ${Math.round(S.timelines[k][CF.PERIOD] / 1000)} t</span>`).join("");
+}
+function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))); const n = x / p; return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p; }
+function passport(r) {
+  const rows = Object.entries(r.byMaterial).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 10);
+  $("#pass").innerHTML = "<tr><td>Material (BR18 table 7)</td><td class='n'>t CO₂e</td></tr>" +
+    rows.map(([id, v]) => `<tr><td>${DB.materials[id].label}</td><td class="n">${fmt(v / 1000, 1)}</td></tr>`).join("");
+}
+document.addEventListener("pointermove", e => {
+  const el = e.target.closest && e.target.closest("[data-tip]"), tip = $("#tip");
+  if (!el) { tip.hidden = true; return; }
+  tip.hidden = false; tip.textContent = el.dataset.tip; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px";
+});
+
+// ------------------------------------------------------------------ 3D
+const canvas = $("#gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07090d);
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: "varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }",
+  fragmentShader: `varying float h; void main(){
+    vec3 zen = vec3(0.02,0.035,0.07), mid = vec3(0.06,0.10,0.17), hor = vec3(0.42,0.24,0.14), gnd = vec3(0.05,0.04,0.035);
+    vec3 c = h > 0.0 ? mix(hor, mix(mid, zen, smoothstep(0.25, 0.9, h)), smoothstep(0.0, 0.25, h)) : mix(hor, gnd, smoothstep(0.0, 0.08, -h));
+    gl_FragColor = vec4(pow(c, vec3(0.9)), 1.); }`
+}));
+scene.add(skyDome);
+scene.fog = new THREE.Fog(0x2a1c14, 260, 780);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 2000);
+camera.position.set(95, 62, 120);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.target.set(0, 12, 0); controls.maxPolarAngle = Math.PI * 0.48; controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+scene.add(new THREE.HemisphereLight(0x8fb2ff, 0x140d08, 0.42));
+const sun = new THREE.DirectionalLight(0xffc68a, 1.9);
+sun.position.set(-140, 55, 90); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -160, right: 160, top: 160, bottom: -160, near: 10, far: 600 });
+scene.add(sun);
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.75, 0.6, 0.82);
+composer.addPass(bloom);
+
+// ground + context
+const ground = new THREE.Mesh(new THREE.CircleGeometry(600, 64), new THREE.MeshStandardMaterial({ color: 0x0d100e, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(600, 120, 0x1c211e, 0x131715); grid.position.y = 0.02; grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+(function trees() {
+  const g = new THREE.Group(), trunkM = new THREE.MeshStandardMaterial({ color: 0x2b2219, roughness: 1 });
+  const leafM = new THREE.MeshStandardMaterial({ color: 0x24402b, roughness: .9, flatShading: true });
+  let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 70; i++) {
+    const a = rnd() * Math.PI * 2, rr = 120 + rnd() * 200, x = Math.cos(a) * rr, z = Math.sin(a) * rr, h = 6 + rnd() * 8;
+    const tr = new THREE.Mesh(new THREE.CylinderGeometry(.25, .35, h * .4, 6), trunkM); tr.position.set(x, h * .2, z);
+    const cr = new THREE.Mesh(new THREE.IcosahedronGeometry(h * .32, 0), leafM); cr.position.set(x, h * .55, z); cr.scale.y = 1.25;
+    cr.castShadow = tr.castShadow = true; g.add(tr, cr);
+  }
+  scene.add(g);
+})();
+
+// procedural facade textures (one bay = 3.6 m wide x 1 storey)
+const texCache = {};
+function facadeTex(kind, wwr) {
+  const key = kind + Math.round(wwr * 100);
+  if (texCache[key]) return texCache[key];
+  const c = document.createElement("canvas"); c.width = c.height = 256; const x = c.getContext("2d");
+  const e = document.createElement("canvas"); e.width = e.height = 256; const ex = e.getContext("2d");
+  const base = { brick: "#8a4a32", wood: "#a1764a", fibrecement: "#9aa0a3", render: "#d9d4c7", existing: "#8d8a82" }[kind];
+  x.fillStyle = base; x.fillRect(0, 0, 256, 256);
+  if (kind === "brick" || kind === "existing") { for (let r = 0; r < 64; r++) for (let q = -1; q < 17; q++) {
+      x.fillStyle = `hsl(${12 + Math.random() * 8},${kind === "brick" ? 45 : 5}%,${28 + Math.random() * 10}%)`;
+      x.fillRect(q * 16 + (r % 2) * 8 + 1, r * 4 + 1, 14, 3); } }
+  if (kind === "wood") for (let q = 0; q < 52; q++) { x.fillStyle = `hsl(28,${35 + Math.random() * 15}%,${30 + Math.random() * 14}%)`; x.fillRect(q * 5, 0, 4.4, 256); }
+  if (kind === "fibrecement") { x.strokeStyle = "#6b7174"; x.lineWidth = 1.5; for (let q = 0; q < 8; q++) for (let r = 0; r < 4; r++) x.strokeRect(q * 32, r * 64, 32, 64); }
+  if (kind === "render") { for (let i = 0; i < 4000; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * .05})`; x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); } }
+  // tile = 4 bays x 2 storeys; window width so window area / bay area == wwr (window height 55 % of storey)
+  const wh = 0.55, ww = Math.min(0.92, wwr / wh);
+  ex.fillStyle = "#000"; ex.fillRect(0, 0, 256, 256);
+  let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let by = 0; by < 2; by++) for (let bx = 0; bx < 4; bx++) {
+    const cw = 64, ch = 128, wx = bx * cw + (1 - ww) / 2 * cw, wy = by * ch + 0.22 * ch, W = ww * cw, Hh = wh * ch;
+    x.fillStyle = "#0d1014"; x.fillRect(wx - 2, wy - 2, W + 4, Hh + 4);
+    const gr = x.createLinearGradient(0, wy, 0, wy + Hh); gr.addColorStop(0, "#33475a"); gr.addColorStop(1, "#10161d");
+    x.fillStyle = gr; x.fillRect(wx, wy, W, Hh);
+    const lit = rnd();
+    if (lit > 0.42) {                                      // ~60 % of flats lit at dusk, warm 2700-3500 K tones
+      ex.fillStyle = lit > 0.85 ? "#ffd6a0" : lit > 0.6 ? "#ffb35c" : "#d98a3c";
+      ex.globalAlpha = 0.35 + 0.5 * rnd(); ex.fillRect(wx + 2, wy + 2, W - 4, Hh - 4); ex.globalAlpha = 1;
+    }
+  }
+  const t = new THREE.CanvasTexture(c), te = new THREE.CanvasTexture(e);
+  [t, te].forEach(q => { q.wrapS = q.wrapT = THREE.RepeatWrapping; q.encoding = THREE.sRGBEncoding; q.anisotropy = 8; });
+  texCache[key] = { map: t, emissive: te };
+  return texCache[key];
+}
+let building = new THREE.Group(); scene.add(building);
+const slabMat = new THREE.MeshStandardMaterial({ color: 0x2a2f2c, roughness: .8 });
+const timberMat = new THREE.MeshStandardMaterial({ color: 0xc89a62, roughness: .7 });
+const roofMats = { flat: new THREE.MeshStandardMaterial({ color: 0x222524, roughness: .95 }),
+                   green: new THREE.MeshStandardMaterial({ color: 0x3f6b2f, roughness: 1 }),
+                   pitched: new THREE.MeshStandardMaterial({ color: 0x8a3b26, roughness: .8 }) };
+const pvMat = new THREE.MeshStandardMaterial({ color: 0x0f1d3a, roughness: .25, metalness: .6, emissive: 0x0a1630, emissiveIntensity: .4 });
+const balcMat = new THREE.MeshStandardMaterial({ color: 0x9aa09c, roughness: .6 });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x88aabb, transparent: true, opacity: .25, roughness: .1 });
+
+function shapeOf(fp, ox, oz) {
+  const s = new THREE.Shape(fp.outer.map(([a, b]) => new THREE.Vector2(a - ox, b - oz)));
+  for (const h of fp.holes) s.holes.push(new THREE.Path(h.map(([a, b]) => new THREE.Vector2(a - ox, b - oz))));
+  return s;
+}
+function rebuild(p) {
+  scene.remove(building); building.traverse(o => o.geometry && o.geometry.dispose());
+  building = new THREE.Group(); scene.add(building);
+  const d = Object.assign({}, design, p);
+  const fp = CF.footprint(d);
+  const xs = fp.outer.map(q => q[0]), zs = fp.outer.map(q => q[1]);
+  const ox = (Math.min(...xs) + Math.max(...xs)) / 2, oz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const shape = shapeOf(fp, ox, oz);
+  const h = d.storeyHeight, nF = Math.max(1, d.floors + (d.mode === "renovate" ? d.topUpFloors : 0));
+  const facade = d.mode === "keep" ? "existing" : d.facade;
+  const tex = facadeTex(facade, d.mode === "keep" ? 0.22 : d.wwr);
+  const fm = new THREE.MeshStandardMaterial({ map: tex.map, emissiveMap: tex.emissive, emissive: 0xffffff, emissiveIntensity: dusk * 1.15, roughness: .85 });
+  fm.map.repeat.set(1 / 14.4, 1 / (2 * h)); fm.emissiveMap.repeat.set(1 / 14.4, 1 / (2 * h));
+  const topTimber = d.mode === "renovate" ? d.topUpFloors : 0;
+  const tm = topTimber ? new THREE.MeshStandardMaterial({ map: facadeTex("wood", d.wwr).map, emissiveMap: facadeTex("wood", d.wwr).emissive,
+                 emissive: 0xffffff, emissiveIntensity: dusk * 1.4, roughness: .8 }) : null;
+  if (tm) { tm.map.repeat.set(1 / 14.4, 1 / (2 * h)); tm.emissiveMap.repeat.set(1 / 14.4, 1 / (2 * h)); }
+  const floorsVisible = p.floorsAnim != null ? p.floorsAnim : nF;
+  for (let i = 0; i < Math.ceil(floorsVisible); i++) {
+    const frac = Math.min(1, floorsVisible - i);
+    const isTop = i === nF - 1 && d.setback > 0;
+    const sh = isTop ? shapeOf({ outer: inset(fp.outer, d.setback), holes: fp.holes }, ox, oz) : shape;
+    const g = new THREE.ExtrudeGeometry(sh, { depth: h * 0.93 * frac, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(g, [roofMats.flat, i >= nF - topTimber ? tm : fm]);
+    mesh.position.y = i * h; mesh.castShadow = mesh.receiveShadow = true;
+    const sg = new THREE.ExtrudeGeometry(sh, { depth: h * 0.07, bevelEnabled: false }); sg.rotateX(-Math.PI / 2);
+    const slab = new THREE.Mesh(sg, d.structure === "timber" && d.mode === "new" ? timberMat : slabMat); slab.position.y = i * h + h * 0.93 * frac;
+    const fl = new THREE.Group(); fl.add(mesh, slab);
+    fl.rotation.y = THREE.MathUtils.degToRad(d.twist * i);
+    if (d.balconies && i > 0) addBalconies(fl, fp, ox, oz, i * h, d);
+    building.add(fl);
+  }
+  // roof
+  const topY = Math.ceil(floorsVisible) * h;
+  const rot = THREE.MathUtils.degToRad(d.twist * (Math.ceil(floorsVisible) - 1));
+  const rg = new THREE.Group(); rg.rotation.y = rot; building.add(rg);
+  if (d.roof === "pitched" && (d.footprint === "bar" || d.footprint === "tower")) {
+    const L = Math.max(...xs) - Math.min(...xs), D = Math.max(...zs) - Math.min(...zs), rh = Math.tan(35 * Math.PI / 180) * D / 2;
+    const geo = new THREE.BufferGeometry();
+    const v = [-L/2,0,-D/2, L/2,0,-D/2, L/2,rh,0, -L/2,rh,0,  -L/2,0,D/2, L/2,0,D/2, L/2,rh,0, -L/2,rh,0,  -L/2,0,-D/2,-L/2,rh,0,-L/2,0,D/2,  L/2,0,-D/2,L/2,0,D/2,L/2,rh,0];
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+    geo.setIndex([0,1,2, 0,2,3, 4,6,5, 4,7,6, 8,10,9, 11,13,12]); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, roofMats.pitched); m.position.y = topY; m.castShadow = true; rg.add(m);
+  } else {
+    const rgeo = new THREE.ExtrudeGeometry(shape, { depth: 0.35, bevelEnabled: false }); rgeo.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(rgeo, d.roof === "green" ? roofMats.green : roofMats.flat); m.position.y = topY; m.receiveShadow = true; rg.add(m);
+    if (d.pv > 0 && d.roof !== "green" && d.mode !== "keep") addPV(rg, fp, ox, oz, topY + 0.35, d.pv);
+  }
+}
+function inset(poly, s) { // axis-aligned inset (good enough for the top-floor setback)
+  const xs = poly.map(p => p[0]), zs = poly.map(p => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  return poly.map(([x, z]) => [x + Math.sign(cx - x) * s, z + Math.sign(cz - z) * s]);
+}
+function addBalconies(group, fp, ox, oz, y, d) {
+  // balconies on the long outer facades only, pushed out along each edge's outward normal
+  const o = fp.outer, n = o.length;
+  let sa = 0; for (let i = 0; i < n; i++) { const [x1, z1] = o[i], [x2, z2] = o[(i + 1) % n]; sa += x1 * z2 - x2 * z1; }
+  const sgn = sa > 0 ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    const [x1, z1] = o[i], [x2, z2] = o[(i + 1) % n], len = Math.hypot(x2 - x1, z2 - z1);
+    if (len < 18) continue;
+    const ux = (x2 - x1) / len, uz = (z2 - z1) / len, nx = uz * sgn, nz = -ux * sgn;      // outward normal
+    const cnt = Math.floor(len / 7.2), ang = Math.atan2(-uz, ux);
+    for (let k = 0; k < cnt; k++) {
+      const s = (k + 0.5) * len / cnt, cx = x1 + ux * s - ox + nx * 0.75, cz = z1 + uz * s - oz + nz * 0.75;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.18, 1.5), balcMat); b.position.set(cx, y + 0.09, cz); b.rotation.y = ang; b.castShadow = true;
+      const r = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.0, 0.04), glassMat); r.position.set(cx + nx * 0.73, y + 0.65, cz + nz * 0.73); r.rotation.y = ang;
+      group.add(b, r);
+    }
+  }
+}
+function addPV(group, fp, ox, oz, y, frac) {
+  const o = fp.outer, x0 = Math.min(...o.map(p => p[0])), x1 = Math.max(...o.map(p => p[0])), z0 = Math.min(...o.map(p => p[1])), z1 = Math.max(...o.map(p => p[1]));
+  const geo = new THREE.BoxGeometry(1.7, 0.06, 1.0);
+  const pts = [];
+  for (let x = x0 + 1.5; x < x1 - 1.5; x += 2.1) for (let z = z0 + 1.5; z < z1 - 1.5; z += 1.6) if (inside(fp, x, z)) pts.push([x, z]);
+  const n = Math.round(pts.length * frac);
+  const inst = new THREE.InstancedMesh(geo, pvMat, Math.max(1, n));
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.18, 0, 0));
+  for (let i = 0; i < n; i++) { m4.compose(new THREE.Vector3(pts[i][0] - ox, y + 0.35, pts[i][1] - oz), q, new THREE.Vector3(1, 1, 1)); inst.setMatrixAt(i, m4); }
+  inst.count = n; group.add(inst);
+}
+function inside(fp, x, z) {
+  const pip = (poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j]; if (((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi)) c = !c; } return c; };
+  return pip(fp.outer) && !fp.holes.some(pip);
+}
+
+// CO2 cloud: whole-life emissions as a volume of CO2 gas at 15 C, 1 atm (1.87 kg/m3) -> 535 m3 per tonne
+const cloudU = { t: { value: 0 }, col: { value: new THREE.Color(0xff7a3d) } };
+const cloudMat = new THREE.ShaderMaterial({
+  uniforms: cloudU, transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+  vertexShader: `varying vec3 vN; varying vec3 vP; uniform float t;
+    void main(){ vN = normalize(normalMatrix*normal); vec3 p = position;
+      float w = sin(p.x*0.08+t*0.7)*0.035 + sin(p.y*0.11-t*0.5)*0.035 + sin(p.z*0.09+t*0.9)*0.03;
+      p += normal * w * length(position); vP = p; gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.); }`,
+  fragmentShader: `varying vec3 vN; varying vec3 vP; uniform vec3 col; uniform float t;
+    void main(){ float f = pow(1.0 - abs(dot(vN, vec3(0.,0.,1.))), 2.2);
+      float n = 0.55 + 0.45*sin(vP.y*0.15 + t*0.6) * sin(vP.x*0.12 - t*0.4);
+      float churn = 0.75 + 0.25*sin(vP.y*0.06 - t*0.35) * sin(vP.x*0.05 + t*0.22) + 0.1*sin(vP.z*0.09 + t*0.5);
+      vec3 smoke = col * 0.16 + vec3(0.02);
+      vec3 rim = col * 1.35;
+      gl_FragColor = vec4(mix(smoke, rim, pow(f, 1.4)), clamp((0.34 + 0.55*f) * churn, 0.0, 0.9)); }`,
+});
+const cloud = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 5), cloudMat); scene.add(cloud);
+const dustGeo = new THREE.BufferGeometry(); const dustN = 2600, dp = new Float32Array(dustN * 3);
+for (let i = 0; i < dustN; i++) { const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.cbrt(Math.random());
+  dp.set([r * Math.sqrt(1 - u * u) * Math.cos(a), r * u, r * Math.sqrt(1 - u * u) * Math.sin(a)], i * 3); }
+dustGeo.setAttribute("position", new THREE.BufferAttribute(dp, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.9, color: 0xffb27a, transparent: true, opacity: .35, depthWrite: false, blending: THREE.AdditiveBlending }));
+scene.add(dust);
+
+// animation state: numeric params tween toward target; discrete choices switch immediately
+let dusk = 0.75, autoFrame = true, frameZoom = 0.78, snapFrame = false;
+canvas.addEventListener("pointerdown", () => { autoFrame = false; });
+canvas.addEventListener("wheel", () => { autoFrame = false; }, { passive: true });
+let cur = null, target = null;
+function targetFrom(d, r) {
+  const tonnes = Math.max(0, r.tonnes);
+  const vol = tonnes * 1000 / 1.87;                       // m3 of CO2 at 15 C
+  const radius = Math.cbrt(3 * vol / (4 * Math.PI));
+  return { length: d.length, depth: d.depth, floors: d.floors + (d.mode === "renovate" ? d.topUpFloors : 0), twist: d.twist,
+           setback: d.setback, wwr: d.wwr, radius, pass: r.pass };
+}
+function lerp(a, b, k) { return a + (b - a) * k; }
+let lastKey = "";
+let capture = false, simT = 0;
+function frame(tm) { if (capture) return; step(tm * 0.001); requestAnimationFrame(frame); }
+function step(t) {
+  controls.update();
+  if (cur && target) {
+    const k = 0.085, next = {};
+    for (const key of ["length", "depth", "floors", "twist", "setback", "wwr", "radius"]) next[key] = lerp(cur[key], target[key], k);
+    const moved = ["length", "depth", "floors", "twist", "setback"].some(q => Math.abs(next[q] - cur[q]) > 1e-3);
+    cur = Object.assign(cur, next);
+    const discrete = JSON.stringify([design.footprint, design.structure, design.facade, design.roof, design.pv, design.balconies, design.mode, design.windows, Math.round(cur.wwr * 50)]);
+    if (moved || discrete !== lastKey) {
+      rebuild({ length: cur.length, depth: cur.depth, floorsAnim: cur.floors, twist: cur.twist, setback: cur.setback, wwr: cur.wwr,
+                floors: Math.round(target.floors) - (design.mode === "renovate" ? design.topUpFloors : 0) });
+      lastKey = discrete;
+    }
+    // cloud placement: beside the building, resting on the ground
+    const rad = cur.radius;
+    const bx = -(Math.max(design.length, 20) / 2 + rad * 0.55 + 10);
+    cloud.scale.setScalar(rad); cloud.position.set(bx, rad, -rad * 0.75 - 14);
+    dust.scale.setScalar(rad * 0.95); dust.position.copy(cloud.position); dust.rotation.y = t * 0.05;
+    cloudU.col.value.set(target.pass ? 0x3fb8c9 : 0xff5a2a);
+    dust.material.color.set(target.pass ? 0x6fd6e4 : 0xff9a5a);
+    cloudU.t.value = t;
+    const p = cloud.position.clone(); p.y = rad * 1.55; p.project(camera);
+    const tag = $("#cloudtag"), r = canvas.getBoundingClientRect();
+    if (p.z < 1) { tag.hidden = false; tag.style.left = r.left + (p.x + 1) / 2 * r.width + "px"; tag.style.top = r.top + (1 - p.y) / 2 * r.height + "px";
+      tag.textContent = `${Math.round(R.tonnes).toLocaleString("en")} t CO₂ over 50 years · real volume ${Math.round(R.tonnes * 1000 / 1.87 / 1000).toLocaleString("en")} 000 m³`; }
+    // frame the camera on building + cloud: a sphere around both, distance from the vertical field of view
+    if (autoFrame) {
+      const hgt = cur.floors * design.storeyHeight;
+      const bc = new THREE.Vector3(0, hgt / 2, 0), cc = cloud.position;
+      const mid = bc.clone().lerp(cc, 0.38); mid.y = Math.max(hgt * 0.55, rad * 0.7);
+      const corners = [[-design.length / 2, 0], [design.length / 2, 0], [0, hgt]].map(([x, y]) => new THREE.Vector3(x, y, 0).distanceTo(mid));
+      const fitR = Math.max(...corners, cc.distanceTo(mid) + rad * 0.85) * 1.08;
+      const halfV = THREE.MathUtils.degToRad(camera.fov / 2), halfH = Math.atan(Math.tan(halfV) * camera.aspect);
+      const dist = fitR / Math.sin(Math.min(halfV, halfH)) * frameZoom;            // fit the narrower axis (portrait-safe)
+      const kf = snapFrame ? 1 : 0.04; snapFrame = false;
+      controls.target.lerp(mid, kf);
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      const want = controls.target.clone().add(dir.multiplyScalar(dist));
+      camera.position.lerp(want, kf);
+    }
+  }
+  composer.render();
+}
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false); composer.setSize(r.width, r.height);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+
+// ------------------------------------------------------------------ actions
+$("#reset").onclick = () => { design = Object.assign({}, CF.DEFAULT_DESIGN); set({}); };
+$("#opt").onclick = () => {
+  const best = CF.optimise(design, DB);
+  caption(`Searched ${best.evaluated.toLocaleString("en")} material combinations · best ${fmt(best.result.total)} kg CO₂e/m²/yr`);
+  set(best.design);
+};
+$("#exp").onclick = async () => {
+  const files = window.LCAbygExport.build(design, DB);
+  const zip = new JSZip(), dir = zip.folder("carbonform_lcabyg");
+  for (const [name, items] of Object.entries(files)) dir.file(name + ".json", JSON.stringify(items, null, 2));
+  const blob = await zip.generateAsync({ type: "blob" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "carbonform_lcabyg.zip"; a.click();
+  caption("LCAbyg 2023 JSON project exported · import it in LCAbyg via File → Import JSON");
+};
+let capT = null;
+function caption(s, ms = 4200) { const c = $("#caption"); c.textContent = s; c.classList.add("on"); clearTimeout(capT); capT = setTimeout(() => c.classList.remove("on"), ms); }
+
+const STORY = [
+  [{ mode: "new", footprint: "bar", structure: "concrete", facade: "brick", insulation: "eps", windows: "pvc", roof: "flat", pv: 0, heating: "district", floors: 5, twist: 0, length: 48 },
+   "A conventional concrete and brick block"],
+  [{ floors: 9, footprint: "U", length: 56 }, "Make it bigger: the carbon cloud grows with it, at its real volume"],
+  [{ structure: "timber", facade: "wood", insulation: "woodfibre", windows: "wood" }, "Swap to CLT, larch and wood fibre: the timber stores carbon up front"],
+  [{ roof: "pitched", footprint: "bar", floors: 6, length: 48 }, "Change the form and the roof"],
+  [{ twist: 3, setback: 1.5, roof: "flat", pv: 0.8, heating: "heatpump" }, "Twist it, add PV and a heat pump"],
+  [{ mode: "keep", twist: 0, setback: 0 }, "Or keep the 1970s block as it is"],
+  [{ mode: "renovate", facade: "wood", insulation: "cellulose", topUpFloors: 2, windows: "wood" }, "Renovate it and add two timber storeys"],
+  [null, "Then let the optimiser search every combination"],
+];
+let storyOn = false;
+async function playStory() {
+  if (storyOn) return; storyOn = true; controls.autoRotateSpeed = 0.9;
+  for (const [patch, text] of STORY) {
+    if (patch) set(patch); else { const best = CF.optimise(Object.assign({}, design, { mode: "new" }), DB); set(best.design); }
+    caption(text + `  ·  ${fmt(R.total)} kg CO₂e/m²/yr`, 3800);
+    await new Promise(r => setTimeout(r, 4200));
+  }
+  controls.autoRotateSpeed = 0.35; storyOn = false;
+}
+$("#story").onclick = playStory;
+window.CFApp = { set, playStory, frame: (z, snap) => { autoFrame = true; if (z) frameZoom = z; if (snap) { snapFrame = true; if (cur && target) Object.assign(cur, target); } },
+  orbit: (az, el) => { const tg = controls.target, r = camera.position.distanceTo(tg); camera.position.set(tg.x + r * Math.cos(el) * Math.sin(az), tg.y + r * Math.sin(el), tg.z + r * Math.cos(el) * Math.cos(az)); },
+  autorotate: v => { controls.autoRotate = v; },
+  startCapture: () => { capture = true; simT = 0; },
+  layout: m => { document.body.classList.toggle("cinema", m === "cinema"); resize(); },
+  captureStep: (dt) => { simT += dt; controls.autoRotateSpeed = controls.autoRotateSpeed; step(simT); },
+  setRotateSpeed: v => { controls.autoRotateSpeed = v; },
+  setCaption: (s) => { const c = $("#caption"); c.textContent = s; c.classList.toggle("on", !!s); }, get design() { return design; }, get result() { return R; }, caption, setDusk: v => { dusk = v; lastKey = ""; } };
+
+buildControls(); set({}, true); cur = targetFrom(design, R); target = targetFrom(design, R); resize(); requestAnimationFrame(frame);
+if (location.hash === "#story") setTimeout(playStory, 800);
+</script>
+</body>
+</html>

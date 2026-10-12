@@ -1,0 +1,9 @@
+﻿numpy
+matplotlib
+pandas
+openpyxl
+playwright
+pytest
+imageio-ffmpeg
+pymupdf
+pillow

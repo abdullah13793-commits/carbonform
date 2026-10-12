@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CarbonForm</title>
+<meta name="description" content="Shape a building, swap its materials and watch its whole-life carbon update live against the Danish BR18 2025 limit.">
+<meta property="og:title" content="CarbonForm: parametric building LCA">
+<meta property="og:description" content="Live whole-life carbon (EN 15978, BR18 2025) for a parametric apartment block, with LCAbyg export.">
+<meta property="og:image" content="preview.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed 3D stage; a control rail on the left, the carbon dashboard on the right; stacks on phones. */
+:root {
+  --bg: #0b0d0c; --panel: rgba(17,20,19,.86); --panel-solid: #121514; --line: #2a302d; --ink: #f2f4ef; --ink2: #b9c0b8; --muted: #7d867e;
+  --accent: #b7f36a; --p1: #3987e5; --p2: #d95926; --p3: #199e70; --p4: #c98500; --p5: #9085e9;
+  --good: #0ca30c; --bad: #e5484d; --warn: #fab219;
+  --f-ui: "Archivo", "Segoe UI", system-ui, sans-serif; --f-data: "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--f-ui); overflow: hidden }
+#stage { position: fixed; inset: 0 }
+canvas#gl { width: 100%; height: 100%; display: block; touch-action: none }
+.rail { position: fixed; top: 16px; bottom: 16px; width: 300px; background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line);
+        border-radius: 14px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin }
+.left { left: 16px } .right { right: 16px; width: 360px }
+.rail > * { flex-shrink: 0 }                       /* keep charts at their natural height; the rail scrolls instead */
+.brand { display: flex; align-items: baseline; justify-content: space-between }
+.brand h1 { font-weight: 800; font-size: 22px; margin: 0; letter-spacing: -.02em }
+.brand h1 span { color: var(--accent) }
+.tag { font: 500 10.5px var(--f-data); color: var(--muted); letter-spacing: .08em; text-transform: uppercase }
+.grp { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line) }
+.grp > .t { font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+.seg { display: flex; flex-wrap: wrap; gap: 4px }
+.seg button { flex: 1 1 auto; min-width: 0; font: 500 12px var(--f-ui); color: var(--ink2); background: transparent; border: 1px solid var(--line);
+              border-radius: 7px; padding: 6px 7px; cursor: pointer; white-space: nowrap }
+.seg button:hover { color: var(--ink); border-color: var(--muted) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #0b0d0c; border-color: var(--ink) }
+.sl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 12.5px; color: var(--ink2) }
+.sl output { font: 500 12px var(--f-data); color: var(--ink) }
+.sl input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent) }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.btn { font: 600 13px var(--f-ui); border-radius: 9px; padding: 10px; border: 1px solid var(--line); background: #1b201e; color: var(--ink); cursor: pointer }
+.btn.primary { background: var(--accent); color: #0b0d0c; border-color: var(--accent) }
+.btn:hover { filter: brightness(1.1) }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.hero { display: grid; gap: 4px }
+.hero .lab { font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+.hero .num { font: 800 54px/1 var(--f-ui); letter-spacing: -.03em; font-variant-numeric: tabular-nums }
+.hero .num small { font: 500 14px var(--f-data); color: var(--ink2); letter-spacing: 0; margin-left: 6px }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--f-data); padding: 4px 9px; border-radius: 999px; width: max-content }
+.chip.ok { background: rgba(12,163,12,.16); color: #8fe58f } .chip.no { background: rgba(229,72,77,.18); color: #ffb1b3 }
+svg text { font-family: var(--f-data); fill: var(--ink2) }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 12.5px; color: var(--ink2) }
+.kv b { font: 500 12.5px var(--f-data); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--ink2) }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px }
+.caption { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); max-width: min(720px, calc(100vw - 720px)); text-align: center;
+           font: 600 clamp(15px, 1.6vw, 22px)/1.3 var(--f-ui); text-shadow: 0 2px 18px #000; pointer-events: none; opacity: 0; transition: opacity .6s }
+.caption.on { opacity: 1 }
+.cloudtag { position: fixed; font: 600 12px var(--f-data); color: var(--ink); background: rgba(0,0,0,.55); padding: 5px 9px; border-radius: 6px;
+            pointer-events: none; transform: translate(-50%, -100%); white-space: nowrap }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: #0b0d0c; font: 500 12px var(--f-data); padding: 5px 8px; border-radius: 6px; z-index: 9 }
+details summary { cursor: pointer; font: 600 11px var(--f-data); color: var(--ink2); letter-spacing: .1em; text-transform: uppercase }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums }
+td { padding: 4px 2px; border-bottom: 1px solid var(--line); color: var(--ink2) } td.n { text-align: right; font-family: var(--f-data); color: var(--ink) }
+.foot { font-size: 11px; color: var(--muted); line-height: 1.45 }
+.foot a { color: var(--ink2) }
+@media (max-width: 1100px) {
+  html, body { overflow: auto } #stage { position: relative; height: 62vh }
+  .rail { position: relative; inset: auto; width: auto; margin: 12px 16px; max-height: none }
+  .caption { max-width: 90vw }
+}
+@media (prefers-reduced-motion: reduce) { .caption { transition: none } }
+body.cinema .rail { display: none } body.cinema #stage { position: fixed; height: 100% } body.cinema .caption { max-width: 88vw; bottom: 9% ; font-size: clamp(22px, 3.4vw, 40px) }
+.hud { position: fixed; left: 5%; top: 4%; display: none; gap: 6px; text-shadow: 0 2px 16px #000 }
+body.cinema .hud { display: grid } .hud .k { font: 600 clamp(12px, 1.6vw, 18px) var(--f-data); color: var(--ink2); letter-spacing: .12em; text-transform: uppercase }
+.hud .v { font: 800 clamp(48px, 8vw, 110px)/1 var(--f-ui); letter-spacing: -.03em } .hud .v small { font: 500 .22em var(--f-data); color: var(--ink2); letter-spacing: 0; margin-left: .4em }
+.hud .brandline { font: 800 clamp(18px, 2.4vw, 30px) var(--f-ui) } .hud .brandline span { color: var(--accent) }
+.hud .bar { height: 10px; border-radius: 5px; background: #1d2320; overflow: hidden; width: min(70vw, 520px) } .hud .bar i { display: block; height: 100%; border-radius: 5px }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas></div>
+<div class="cloudtag" id="cloudtag" hidden></div>
+<div class="caption" id="caption"></div>
+<div class="tip" id="tip" hidden></div>
+<div class="hud" id="hud"><div class="brandline">Carbon<span>Form</span></div><div class="k">Whole-life carbon · BR18 2025</div>
+  <div class="v" id="hudv">0.00<small>kg CO₂e/m²/yr</small></div><div class="bar"><i id="hudbar"></i></div><div id="hudchip"></div></div>
+
+<aside class="rail left" aria-label="Design controls">
+  <div class="brand"><h1>Carbon<span>Form</span></h1><span class="tag">BR18 · 2025</span></div>
+  <div class="grp"><div class="t">Project</div><div class="seg" data-k="mode"></div>
+    <div class="sl" id="sl-topUpFloors"></div></div>
+  <div class="grp"><div class="t">Form</div><div class="seg" data-k="footprint"></div>
+    <div class="sl" id="sl-length"></div><div class="sl" id="sl-depth"></div><div class="sl" id="sl-floors"></div>
+    <div class="sl" id="sl-twist"></div><div class="sl" id="sl-setback"></div><div class="sl" id="sl-wwr"></div></div>
+  <div class="grp"><div class="t">Structure</div><div class="seg" data-k="structure"></div></div>
+  <div class="grp"><div class="t">Facade</div><div class="seg" data-k="facade"></div></div>
+  <div class="grp"><div class="t">Insulation</div><div class="seg" data-k="insulation"></div></div>
+  <div class="grp"><div class="t">Windows</div><div class="seg" data-k="windows"></div></div>
+  <div class="grp"><div class="t">Roof &amp; energy</div><div class="seg" data-k="roof"></div><div class="seg" data-k="heating"></div>
+    <div class="sl" id="sl-pv"></div>
+    <div class="seg" data-k="balconies"></div></div>
+  <div class="btns"><button class="btn primary" id="opt" type="button">Find lowest carbon</button><button class="btn" id="story" type="button">Play the story</button>
+    <button class="btn" id="exp" type="button">Export to LCAbyg</button><button class="btn" id="reset" type="button">Reset</button></div>
+  <p class="foot">Data: BR18 annex 2 table 7 (2025) and ÖKOBAUDAT. B6 factors: SBST 2025–2075. Design-stage screening, not a BR18 submission.</p>
+</aside>
+
+<aside class="rail right" aria-label="Carbon dashboard">
+  <div class="hero"><div class="lab">Whole-life carbon · A1–A3, B4, B6, C3–C4</div>
+    <div class="num" id="hero">0.00<small>kg CO₂e/m²/yr</small></div>
+    <div id="chip"></div></div>
+  <svg id="gauge" viewBox="0 0 330 64" width="100%" role="img" aria-label="Result against BR18 limits"></svg>
+  <div class="kv" id="kpis"></div>
+  <div class="grp"><div class="t">Life-cycle modules</div><svg id="mods" viewBox="0 0 330 70" width="100%"></svg>
+    <div class="legend" id="modleg"></div></div>
+  <div class="grp"><div class="t">Where the carbon is</div><svg id="parts" viewBox="0 0 330 150" width="100%"></svg></div>
+  <div class="grp"><div class="t">Keep · renovate · rebuild, 50 years</div><svg id="tl" viewBox="0 0 330 170" width="100%"></svg>
+    <div class="legend" id="tlleg"></div></div>
+  <details><summary>Material passport</summary><table id="pass"></table></details>
+  <p class="foot" id="srcnote"></p>
+</aside>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>/* CarbonForm engine: parametric apartment block -> quantities -> whole-life carbon (EN 15978, BR18 2025).
+ *
+ * Pure functions, no DOM. Used live by the web app and, via Playwright, by the Python test suite, which
+ * checks it against an independent Python implementation (src/carbon/engine.py).
+ *
+ * Material data: BR18 annex 2 table 7 (2025) generic dataset (+ ÖKOBAUDAT for green roof and transport).
+ * Units: m, m2, m3, kg, kWh, kg CO2e. Reference period 50 years. Results per m2 floor area per year.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.CarbonForm = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const PERIOD = 50;
+  const START_YEAR = 2026;
+
+  // BR18 limits from 1 July 2025, kg CO2e / m2 / year
+  const LIMITS = { main: 7.5, construction: 1.5, main_2023: 12.0, main_2027: 6.4, main_2029: 5.8 };
+
+  // Danish B6 emission factors 2025-2075 (SBST, Artelia 2023, table 1), kg CO2e/kWh, linear between points
+  const EF_YEARS = [2025, 2030, 2035, 2040, 2045, 2050];
+  const EF_EL = [0.0801, 0.0325, 0.0291, 0.0285, 0.0261, 0.0248];
+  const EF_DH = [0.0418, 0.0181, 0.0140, 0.0134, 0.0132, 0.0132];
+  function ef(series, year) {
+    if (year <= EF_YEARS[0]) return series[0];
+    const last = EF_YEARS.length - 1;
+    if (year >= EF_YEARS[last]) return series[last];
+    for (let i = 0; i < last; i++) {
+      if (year <= EF_YEARS[i + 1]) {
+        const t = (year - EF_YEARS[i]) / (EF_YEARS[i + 1] - EF_YEARS[i]);
+        return series[i] + t * (series[i + 1] - series[i]);
+      }
+    }
+    return series[last];
+  }
+
+  // A4 transport distances (km) and A5 waste rates
+  const TRANSPORT_KM = { concrete_c30: 30, concrete_c25: 30, hollowcore: 80, precast_wall20: 80, precast_wall15: 80, stair: 80 };
+  const DEFAULT_KM = 150;
+  const WASTE = { concrete_c30: 0.02, concrete_c25: 0.02, rebar: 0.03, hollowcore: 0.01, precast_wall20: 0.01,
+                  precast_wall15: 0.01, stair: 0.0, door_steel: 0.0 };
+  const DEFAULT_WASTE = 0.05;
+
+  const OPTIONS = {
+    footprint: ["bar", "L", "U", "courtyard", "tower"],
+    structure: ["concrete", "precast", "timber", "steel"],
+    facade: ["brick", "wood", "fibrecement", "render"],
+    insulation: ["mineralwool", "woodfibre", "eps", "cellulose"],
+    windows: ["wood", "woodalu", "pvc", "curtain"],
+    roof: ["flat", "green", "pitched"],
+    heating: ["district", "heatpump"],
+    mode: ["new", "renovate", "keep"],
+  };
+  const LABELS = {
+    concrete: "In-situ concrete", precast: "Precast concrete", timber: "CLT timber", steel: "Steel frame",
+    brick: "Brick", wood: "Larch", fibrecement: "Fibre cement", render: "Rendered ETICS",
+    mineralwool: "Mineral wool", woodfibre: "Wood fibre", eps: "EPS", cellulose: "Cellulose",
+    woodalu: "Wood-alu", pvc: "PVC", curtain: "Curtain wall",
+    flat: "Flat (felt)", green: "Green roof", pitched: "Pitched (tiles)", district: "District heating", heatpump: "Heat pump",
+    bar: "Bar", L: "L-shape", U: "U-shape", courtyard: "Courtyard", tower: "Tower",
+  };
+
+  const DEFAULT_DESIGN = {
+    mode: "new", footprint: "bar", length: 48, depth: 13, floors: 5, storeyHeight: 3.0, twist: 0, setback: 0,
+    structure: "concrete", facade: "brick", insulation: "mineralwool", windows: "woodalu", wwr: 0.30,
+    roof: "flat", pv: 0.0, balconies: true, heating: "district", topUpFloors: 0,
+  };
+
+  // ---------------------------------------------------------------- geometry
+  function polyArea(p) { let a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; }
+  function polyPerim(p) { let s = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; s += Math.hypot(x2 - x1, y2 - y1); } return s; }
+
+  /** Footprint outline: {outer:[[x,y]..], holes:[[[x,y]..]]}, axis-aligned, metres. */
+  function footprint(d) {
+    const L = d.length, D = d.depth;
+    switch (d.footprint) {
+      case "L": { const W = Math.max(D * 1.5, 0.6 * L); return { outer: [[0, 0], [L, 0], [L, D], [D, D], [D, W], [0, W]], holes: [] }; }
+      case "U": { const W = Math.max(D * 1.8, 0.6 * L); return { outer: [[0, 0], [L, 0], [L, W], [L - D, W], [L - D, D], [D, D], [D, W], [0, W]], holes: [] }; }
+      case "courtyard": { const W = Math.max(D * 2.6, 0.75 * L); return { outer: [[0, 0], [L, 0], [L, W], [0, W]], holes: [[[D, D], [D, W - D], [L - D, W - D], [L - D, D]]] }; }
+      case "tower": { const s = Math.max(D * 1.6, 16); return { outer: [[0, 0], [s, 0], [s, s], [0, s]], holes: [] }; }
+      default: return { outer: [[0, 0], [L, 0], [L, D], [0, D]], holes: [] };
+    }
+  }
+
+  function geometry(d) {
+    const fp = footprint(d);
+    const area = polyArea(fp.outer) - fp.holes.reduce((s, h) => s + polyArea(h), 0);
+    const perim = polyPerim(fp.outer) + fp.holes.reduce((s, h) => s + polyPerim(h), 0);
+    const floors = d.floors + (d.mode === "renovate" ? (d.topUpFloors || 0) : 0);
+    const topLoss = d.setback > 0 && floors > 1 ? Math.min(area * 0.6, perim * d.setback) : 0;
+    const gfa = area * floors - topLoss;
+    const wallGross = perim * d.storeyHeight * floors;
+    const windowArea = wallGross * d.wwr;
+    const wallOpaque = wallGross - windowArea;
+    const roofArea = d.roof === "pitched" ? area / Math.cos((35 * Math.PI) / 180) : area;
+    const nBalc = d.balconies ? floors * Math.max(1, Math.floor(perim / 2 / 7)) : 0;
+    const cores = Math.max(1, Math.ceil(area / 450));
+    return { fp, footprintArea: area, perimeter: perim, floors, gfa, wallGross, windowArea, wallOpaque, roofArea, nBalc,
+             balconyArea: nBalc * 5.25, cores, heightTotal: floors * d.storeyHeight };
+  }
+
+  // ---------------------------------------------------------------- assemblies
+  const R_OTHER = 0.4;                                  // m2K/W of the other layers + surface resistances
+  const U_NEW = { wall: 0.15, roof: 0.10, ground: 0.10 };
+  const U_OLD = { wall: 0.60, roof: 0.40, ground: 0.50, window: 2.8 };   // 1970s Danish block
+  const INSUL = { mineralwool: ["mw_facade", "mw_roof"], woodfibre: ["wood_fibre", "wood_fibre"], eps: ["eps", "eps"],
+                  cellulose: ["cellulose", "cellulose"] };
+  const LAMBDA = { mineralwool: 0.034, woodfibre: 0.040, eps: 0.031, cellulose: 0.039 };
+
+  /** insulation layer for a required thermal resistance R (m2K/W) -> {materialId: quantity per m2} */
+  function insulationLayer(kind, R, roof, DB) {
+    const id = INSUL[kind][roof ? 1 : 0];
+    const m = DB.materials[id];
+    if (m.unit === "m2R") return { [id]: R };
+    // cellulose is declared per kg: thickness = R * lambda, mass = thickness * density
+    return { [id]: R * LAMBDA[kind] * (m.density || 43.75) };
+  }
+  function thickness(kind, R) { return R * LAMBDA[kind]; }
+
+  const STRUCT = {
+    concrete: { slab: { concrete_c30: 0.22, rebar: 19.8 }, intWall: { concrete_c30: 0.18, rebar: 10.8 },
+                extBack: { concrete_c30: 0.15, rebar: 9.0 }, roofDeck: { concrete_c30: 0.22, rebar: 19.8 }, found: 1.0 },
+    precast:  { slab: { hollowcore: 1, concrete_c25: 0.03 }, intWall: { precast_wall20: 1 }, extBack: { precast_wall15: 1 },
+                roofDeck: { hollowcore: 1, concrete_c25: 0.03 }, found: 0.95 },
+    timber:   { slab: { clt: 0.16, concrete_c25: 0.04, gypsum: 2 }, intWall: { clt: 0.10, gypsum: 4 },
+                extBack: { timber: 0.025, gypsum: 2 }, roofDeck: { clt: 0.14 }, found: 0.6 },
+    steel:    { slab: { hollowcore: 1, steel_section: 22, concrete_c25: 0.03 }, intWall: { gypsum: 4, steel_section: 4 },
+                extBack: { steel_section: 8, gypsum: 2 }, roofDeck: { hollowcore: 1, steel_section: 10 }, found: 0.85 },
+  };
+  const CLADDING = {
+    brick: { mats: { brick: 194.4, steel_section: 2 }, life: 120 },          // 108 mm x 1800 kg/m3
+    wood: { mats: { larch: 0.022, timber: 0.006 }, life: 40 },
+    fibrecement: { mats: { fibre_cement: 1, steel_section: 1.5 }, life: 50 },
+    render: { mats: { etics_render: 1 }, life: 40 },
+  };
+  const WINDOWS = {
+    wood: { id: "window_wood", life: 40, U: 0.80 },
+    woodalu: { id: "window_woodalu", life: 40, U: 0.75 },
+    pvc: { id: "window_pvc", life: 30, U: 0.85 },
+    curtain: { id: "curtain_wall", life: 40, U: 0.90 },
+  };
+  const ROOF_FINISH = {
+    flat: { mats: { roofing_felt: 1 }, life: 30 },
+    green: { mats: { roofing_felt: 1, green_roof: 1 }, life: 40 },
+    pitched: { mats: { roof_tiles: 52.5, timber: 0.03 }, life: 60 },
+  };
+
+  /** Component list: {key, group, label, qty, unit, mats{id: qtyPerUnit}, life, existing} */
+  function components(d, g, DB) {
+    const comps = [];
+    const reno = d.mode !== "new";
+    const add = (key, group, label, qty, unit, mats, life, existing = false) =>
+      comps.push({ key, group, label, qty, unit, mats, life, existing });
+    const S = reno ? STRUCT.concrete : STRUCT[d.structure];
+    const baseFloors = d.floors;
+    const k = (S.found || 1) * (baseFloors / 5);
+    add("foundation", "foundation", "Strip foundations", g.perimeter, "m", { concrete_c25: 0.5 * k, rebar: 20 * k }, 120, reno);
+    add("ground_slab", "foundation", "Ground slab", g.footprintArea, "m2", { concrete_c25: 0.12, rebar: 6 }, 120, reno);
+    add("ground_insulation", "foundation", "Ground slab insulation", g.footprintArea, "m2",
+        insulationLayer("eps", reno ? 1.5 : 1 / U_NEW.ground - R_OTHER, false, DB), 120, reno);
+    add("slabs", "structure", "Floor slabs", g.footprintArea * (baseFloors - 1), "m2", S.slab, 120, reno);
+    add("int_walls", "structure", "Load-bearing inner walls", 0.30 * g.footprintArea * baseFloors, "m2", S.intWall, 120, reno);
+    add("ext_backing", "structure", "Exterior wall structure", g.wallOpaque * (baseFloors / g.floors), "m2", S.extBack, 120, reno);
+    add("roof_deck", "structure", "Roof deck", g.footprintArea, "m2", S.roofDeck, 120, reno);
+    add("stairs", "structure", "Stairs", g.cores * baseFloors, "pcs", { stair: 1 }, 120, reno);
+    if (d.mode === "renovate" && d.topUpFloors > 0) {
+      const T = STRUCT.timber, share = d.topUpFloors / g.floors;
+      add("topup_slabs", "structure", "Timber top-up: floors", g.footprintArea * d.topUpFloors, "m2", T.slab, 120);
+      add("topup_walls", "structure", "Timber top-up: inner walls", 0.30 * g.footprintArea * d.topUpFloors, "m2", T.intWall, 120);
+      add("topup_ext", "structure", "Timber top-up: exterior walls", g.wallOpaque * share, "m2", T.extBack, 120);
+      add("topup_stairs", "structure", "Timber top-up: stairs", g.cores * d.topUpFloors, "pcs", { stair: 1 }, 120);
+    }
+    if (d.mode === "keep") {
+      // no renovation, but ordinary maintenance still happens: like-for-like windows and roofing replaced on schedule
+      add("maint_windows", "windows", "Window replacement (like-for-like)", g.windowArea, "m2", { window_pvc: 1 }, 30, "maintain");
+      add("maint_roof", "roof", "Roofing replacement (like-for-like)", g.roofArea, "m2", { roofing_felt: 1 }, 30, "maintain");
+      return comps;
+    }
+    const Rw = reno ? 1 / U_NEW.wall - 1 / U_OLD.wall : 1 / U_NEW.wall - R_OTHER;
+    const Rr = reno ? 1 / U_NEW.roof - 1 / U_OLD.roof : 1 / U_NEW.roof - R_OTHER;
+    add("wall_insulation", "facade", `Facade insulation (${Math.round(thickness(d.insulation, Rw) * 1000)} mm)`, g.wallOpaque, "m2",
+        insulationLayer(d.insulation, Rw, false, DB), 80);
+    add("cladding", "facade", `Cladding: ${LABELS[d.facade]}`, g.wallOpaque, "m2", CLADDING[d.facade].mats, CLADDING[d.facade].life);
+    add("windows", "windows", `Windows: ${LABELS[d.windows] || d.windows}`, g.windowArea, "m2", { [WINDOWS[d.windows].id]: 1 }, WINDOWS[d.windows].life);
+    add("roof_insulation", "roof", `Roof insulation (${Math.round(thickness(d.insulation, Rr) * 1000)} mm)`, g.footprintArea, "m2",
+        insulationLayer(d.insulation, Rr, true, DB), 80);
+    add("roof_finish", "roof", `Roof: ${LABELS[d.roof]}`, g.roofArea, "m2", ROOF_FINISH[d.roof].mats, ROOF_FINISH[d.roof].life);
+    add("partitions", "interior", "Partitions", (reno ? 0.3 : 1) * g.gfa, "m2", { gypsum: 1.6, timber: 0.002 }, 50);
+    add("flooring", "interior", "Floor finishes", (reno ? 0.5 : 1) * g.gfa * 0.85, "m2", { parquet: 1 }, 30);
+    add("doors", "interior", "Apartment doors", Math.ceil(g.gfa / 75), "pcs", { door_steel: 1 }, 40);
+    if (g.nBalc > 0) add("balconies", "balconies", "Balconies", g.nBalc, "pcs", { precast_wall20: 5.25, steel_section: 30 }, 80);
+    if (d.pv > 0 && d.roof !== "green") add("pv", "energy", "Rooftop PV", d.pv * g.footprintArea * 0.6, "m2", { pv: 1 }, 30);
+    return comps;
+  }
+
+  // ---------------------------------------------------------------- operational energy (screening, not Be18)
+  const DEGREE_KH = 100;   // heating-season degree kilo-hours, Danish climate, indoor 20 C
+  function energy(d, g) {
+    const keep = d.mode === "keep";
+    const Uw = keep ? U_OLD.wall : U_NEW.wall, Ur = keep ? U_OLD.roof : U_NEW.roof;
+    const Ug = d.mode === "new" ? U_NEW.ground : U_OLD.ground;
+    const Uwin = keep ? U_OLD.window : WINDOWS[d.windows].U;
+    const Htr = 1.10 * (Uw * g.wallOpaque + Ur * g.footprintArea + 0.5 * Ug * g.footprintArea + Uwin * g.windowArea);
+    const mech = keep ? 0.0 : 0.30, hr = 0.85, infil = keep ? 0.50 : 0.10;    // l/s per m2
+    const Hve = (mech * (1 - hr) + infil) * 1e-3 * g.gfa * 1200;
+    const H = Htr + Hve;
+    const loss = H * DEGREE_KH;
+    const gains = 20 * g.gfa + 61 * g.windowArea;                              // internal + solar, heating season
+    const heat = Math.max(0, loss - 0.8 * gains);
+    const dhw = 13 * g.gfa;
+    const elBase = (keep ? 3 : 5) * g.gfa;
+    const hp = d.heating === "heatpump" && !keep;
+    const COP = 3.0;
+    const heatDelivered = heat + dhw;
+    const elHP = hp ? heatDelivered / COP : 0;
+    const pvArea = d.pv > 0 && d.roof !== "green" && !keep ? d.pv * g.footprintArea * 0.6 : 0;
+    const pvYield = pvArea * 180;
+    const elDemand = elBase + elHP;
+    const pvUsed = Math.min(pvYield, elDemand);
+    const elGrid = elDemand - pvUsed;
+    const dhGrid = hp ? 0 : heatDelivered;
+    return { H, Htr, Hve, heat, dhw, elBase, elHP, pvYield, pvUsed, elGrid, dhGrid, pvArea,
+             heat_m2: heat / g.gfa, delivered_m2: (elGrid + dhGrid) / g.gfa };
+  }
+  function b6Series(en) {
+    const out = [];
+    for (let i = 0; i < PERIOD; i++) { const y = START_YEAR + i; out.push(en.elGrid * ef(EF_EL, y) + en.dhGrid * ef(EF_DH, y)); }
+    return out;
+  }
+
+  // ---------------------------------------------------------------- LCA
+  function gwp(DB, id, mod) {
+    const m = DB.materials[id];
+    if (!m) throw new Error("unknown material " + id);
+    const v = m.gwp[mod];
+    return v == null ? 0 : v / (m.per || 1);
+  }
+  function materialMass(DB, id, q) {
+    const m = DB.materials[id];
+    if (m.unit === "kg") return q;
+    if (m.unit === "m³" || m.unit === "m3") return q * (m.density || 0);
+    if (m.unit === "m2R") return q * (m.lambda || 0.035) * (m.density || 30);
+    if (m.unit === "stk" || m.unit === "pcs") return q * (m.mass_per_pcs || 0);
+    return q * (m.mass_per_m2 || 0);
+  }
+
+  function evaluate(design, DB) {
+    const d = Object.assign({}, DEFAULT_DESIGN, design || {});
+    const g = geometry(d);
+    const comps = components(d, g, DB);
+    const truck = gwp(DB, "truck", "A4") / 1000;              // kg CO2e per kg.km
+    const mods = { A1A3: 0, A4: 0, A5: 0, B4: 0, B6: 0, C3C4: 0, D: 0 };
+    const byGroup = {}, byMaterial = {}, events = [], rows = [];
+    let instDeferred = 0;
+    let mass = 0;
+    for (const c of comps) {
+      const n = Math.max(0, Math.ceil(PERIOD / c.life) - 1);
+      const r = { key: c.key, group: c.group, label: c.label, qty: c.qty, unit: c.unit, life: c.life, n, existing: c.existing,
+                  A1A3: 0, A4: 0, A5: 0, B4: 0, C3C4: 0, D: 0, mass: 0, mats: c.mats };
+      for (const id of Object.keys(c.mats)) {
+        const q = c.mats[id] * c.qty;
+        const a13 = q * gwp(DB, id, "A1-A3");
+        const c34 = q * (gwp(DB, id, "C3") + gwp(DB, id, "C4"));
+        const dd = q * gwp(DB, id, "D");
+        const ms = materialMass(DB, id, q);
+        r.mass += ms;
+        if (c.existing === "maintain") {                     // existing item: only its future replacements count
+          r.B4 += n * (a13 + c34); r.A4 += 0; byMaterial[id] = (byMaterial[id] || 0) + n * (a13 + c34); continue;
+        }
+        if (c.existing) { r.C3C4 += c34; byMaterial[id] = (byMaterial[id] || 0) + c34; continue; }
+        const w = WASTE[id] != null ? WASTE[id] : DEFAULT_WASTE;
+        r.A1A3 += a13; r.C3C4 += c34; r.D += dd * (1 + n);
+        r.A4 += ms * (TRANSPORT_KM[id] || DEFAULT_KM) * truck;
+        r.A5 += w * (a13 + c34);
+        r.B4 += n * (a13 + c34);
+        byMaterial[id] = (byMaterial[id] || 0) + (1 + n) * (a13 + c34);
+      }
+      for (let i = 1; i <= n; i++) events.push({ year: i * c.life, kg: r.B4 / n });
+      mods.A1A3 += r.A1A3; mods.A4 += r.A4; mods.A5 += r.A5; mods.B4 += r.B4; mods.C3C4 += r.C3C4; mods.D += r.D;
+      byGroup[c.group] = (byGroup[c.group] || 0) + r.A1A3 + r.B4 + r.C3C4;
+      mass += r.mass;
+      rows.push(r);
+    }
+    // technical installations: BR18 standard values (kg CO2e/m2/yr). Counted in every scenario: an unrenovated
+    // building also renews its heating, water and ventilation systems within 50 years.
+    {
+      const inst = { key: "installations", group: "installations", label: "Technical installations (BR18 standard values)",
+                     qty: g.gfa, unit: "m2", life: PERIOD, n: 0, existing: false, A1A3: 0, A4: 0, A5: 0, B4: 0, C3C4: 0, D: 0, mass: 0, mats: {} };
+      for (const id of ["inst_drain", "inst_water", "inst_hvac"]) {
+        inst.A1A3 += g.gfa * PERIOD * gwp(DB, id, "A1-A3");
+        inst.C3C4 += g.gfa * PERIOD * (gwp(DB, id, "C3") + gwp(DB, id, "C4"));
+        inst.D += g.gfa * PERIOD * gwp(DB, id, "D");
+        inst.mats[id] = 1;
+      }
+      mods.A1A3 += inst.A1A3; mods.C3C4 += inst.C3C4; mods.D += inst.D;
+      if (d.mode === "keep") instDeferred = inst.A1A3;            // an old block renews its systems mid-life, not on day one
+      byGroup.installations = inst.A1A3 + inst.C3C4;
+      rows.push(inst);
+    }
+    // site processes (A5): 15 kWh electricity + 1.2 l diesel per m2 of new / renovated floor area
+    const siteArea = d.mode === "new" ? g.gfa : d.mode === "renovate" ? 0.35 * g.gfa : 0;
+    mods.A5 += siteArea * (15 * ef(EF_EL, START_YEAR) + 1.2 * 2.7);
+    const en = energy(d, g);
+    const b6 = b6Series(en);
+    mods.B6 = b6.reduce((s, v) => s + v, 0);
+    byGroup.operation = mods.B6;
+    const denom = g.gfa * PERIOD;
+    const main = (mods.A1A3 + mods.B4 + mods.B6 + mods.C3C4) / denom;
+    const constr = (mods.A4 + mods.A5) / denom;
+    const timeline = [mods.A1A3 + mods.A4 + mods.A5 - instDeferred];
+    for (let i = 0; i < PERIOD; i++) {
+      let v = timeline[i] + b6[i];
+      if (i + 1 === 25) v += instDeferred;
+      for (const e of events) if (e.year === i + 1) v += e.kg;
+      if (i === PERIOD - 1) v += mods.C3C4;
+      timeline.push(v);
+    }
+    return {
+      design: d, geometry: g, components: rows, energy: en, b6, modules: mods, byGroup, byMaterial, mass,
+      perM2Yr: { A1A3: mods.A1A3 / denom, A4: mods.A4 / denom, A5: mods.A5 / denom, B4: mods.B4 / denom,
+                 B6: mods.B6 / denom, C3C4: mods.C3C4 / denom, D: mods.D / denom },
+      total: main, construction: constr, upfront_m2: (mods.A1A3 + mods.A4 + mods.A5) / g.gfa,
+      limits: LIMITS, pass: main <= LIMITS.main, passConstruction: constr <= LIMITS.construction,
+      tonnes: (mods.A1A3 + mods.A4 + mods.A5 + mods.B4 + mods.B6 + mods.C3C4) / 1000, timeline,
+    };
+  }
+
+  /** Same site, three futures: keep the 1970s block, renovate it, or demolish and build the design new. */
+  function scenarios(design, DB) {
+    const d = Object.assign({}, DEFAULT_DESIGN, design || {});
+    const keep = evaluate(Object.assign({}, d, { mode: "keep", topUpFloors: 0 }), DB);
+    const reno = evaluate(Object.assign({}, d, { mode: "renovate" }), DB);
+    const fresh = evaluate(Object.assign({}, d, { mode: "new" }), DB);
+    // demolishing the existing block releases its end-of-life emissions at year 0
+    const demolition = keep.modules.C3C4;
+    const newTimeline = fresh.timeline.map(v => v + demolition);
+    const cross = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] <= b[i] && i > 0) return i; return null; };
+    return { keep, renovate: reno, newBuild: fresh, demolition,
+             timelines: { keep: keep.timeline, renovate: reno.timeline, newBuild: newTimeline },
+             breakEvenRenovateVsKeep: cross(reno.timeline, keep.timeline),
+             breakEvenNewVsKeep: cross(newTimeline, keep.timeline) };
+  }
+
+  /** Exhaustive search over the discrete material choices (geometry fixed). */
+  function optimise(design, DB, opts) {
+    const base = Object.assign({}, DEFAULT_DESIGN, design || {});
+    const keys = (opts && opts.keys) || ["structure", "facade", "insulation", "windows", "roof", "heating"];
+    const pvChoices = (opts && opts.pv) || [0, 0.6];
+    let best = null, n = 0;
+    const rec = (i, cur) => {
+      if (i === keys.length) {
+        for (const pv of pvChoices) {
+          const dd = Object.assign({}, cur, { pv });
+          const r = evaluate(dd, DB); n++;
+          const score = r.total + 0.25 * Math.max(0, r.construction - LIMITS.construction);
+          if (!best || score < best.score) best = { score, design: dd, result: r };
+        }
+        return;
+      }
+      for (const v of OPTIONS[keys[i]]) rec(i + 1, Object.assign({}, cur, { [keys[i]]: v }));
+    };
+    rec(0, base);
+    best.evaluated = n;
+    return best;
+  }
+
+  return { evaluate, scenarios, optimise, geometry, footprint, components, energy, ef, insulationLayer,
+           EF_EL, EF_DH, EF_YEARS, LIMITS, OPTIONS, LABELS, DEFAULT_DESIGN, PERIOD, START_YEAR, U_NEW, U_OLD, R_OTHER };
+});
+</script>
+<script>/* Browser port of src/lcabyg_export.py: CarbonForm design -> LCAbyg 5 (LCAbyg 2023) JSON import files.
+ * Same node/edge structure as the Python exporter; the test suite checks both recompute to the engine totals. */
+(function (root) {
+  "use strict";
+  const CF = root.CarbonForm;
+  const EX = { project: "e9e6e798-390e-4419-a1fa-3b46a8ba5b8d", root: "216cf5d6-3e9d-43ec-b0d8-5aee02240c28",
+    model: "aeefab8a-e825-4d14-b0c3-e87b7759e5b2", process: "349738da-9747-4d5c-b508-2a810317166f",
+    op_main: "0338d31e-3876-440d-a88c-2daa2dd81942", op_install: "c33cf608-9ceb-47f3-9ccf-c3ecb58ddb96",
+    el_source: "e967c8e7-e73d-47f3-8cba-19569ad76b4d", dh_source: "d92c95dc-cd10-4eb1-821d-5c724d9cafb8",
+    el_source2: "84ddd0e5-85a1-48cb-ab90-aa19b3359458", stage_cat: "4cf6cca4-0814-42d3-b26d-c0dd3792bccd" };
+  const SUPER = ["0ae65810-51bc-4130-89a0-9c107f1aca3f", "20c75334-735c-442f-a541-985ac5a130c8", "9e7adf74-5281-4aa4-9cff-d903a4266aae",
+    "bae7f4b9-967c-4542-bc99-f744aa261424", "ca17092d-2a42-4941-b478-669b12001556", "487184b7-5568-497b-b7e2-e8d2269e51ef",
+    "a1746ce9-3d06-424c-a701-34a090f08433", "571650a7-4259-4cc1-9d56-a12e516fd495", "e5937376-1d7f-4edf-9710-cafd7fe91606",
+    "6808ac7b-2a79-45a6-8013-5f89ad13c337", "f7737ac7-ea51-488e-81de-9c1bab1c08bf", "3cb417d3-d615-402e-81dc-d7d587e83ac1",
+    "ac7112e7-ccea-4e1b-a6a2-9c9c3b9a7177", "1e853d01-fce5-4947-850d-e0b43e51b1fc", "d50ad0a5-636a-4169-b4d7-21e9b64d94a8",
+    "dad100a3-f570-4c96-bec0-9028bc5f6835", "de3a2393-388c-4079-9e7d-6529c14f8a69"];
+  const CAT = { foundation: "1a966c7c-fd7c-4abc-9d4b-307fdcd0cc88", ground_slab: "2ffe16fd-f0c9-4d31-a31a-f96d58d3df95",
+    ground_insulation: "2ffe16fd-f0c9-4d31-a31a-f96d58d3df95", slabs: "f4c234ec-77f1-4ee0-92d0-f1819e0307d4",
+    topup_slabs: "f4c234ec-77f1-4ee0-92d0-f1819e0307d4", int_walls: "59ab59a5-2482-45ae-85f1-d0e39e640712",
+    topup_walls: "59ab59a5-2482-45ae-85f1-d0e39e640712", ext_backing: "10a52123-48d7-466a-9622-d463511a6df0",
+    topup_ext: "10a52123-48d7-466a-9622-d463511a6df0", wall_insulation: "10a52123-48d7-466a-9622-d463511a6df0",
+    cladding: "10a52123-48d7-466a-9622-d463511a6df0", roof_deck: "d734712a-d27d-42c5-936f-98fe4c4df90b",
+    roof_insulation: "d734712a-d27d-42c5-936f-98fe4c4df90b", roof_finish: "d734712a-d27d-42c5-936f-98fe4c4df90b",
+    stairs: "1caeddce-29e9-4067-b85b-36e8d103a4a0", topup_stairs: "1caeddce-29e9-4067-b85b-36e8d103a4a0",
+    windows: "dcbf55db-3189-4d22-9b2b-2e27c057b363", partitions: "a9ab6709-61e1-46c1-a2e8-df00bdd0bb91",
+    flooring: "14bdd9bc-fc11-4846-b89d-5434dd04b773", doors: "9bd14e05-5fba-4ecb-ab41-7940a8a0dbdc",
+    balconies: "a48092d1-8b5c-4fa9-9ada-69cec3fd1dca", pv: "dc4a81ce-2d10-4fba-b282-a3cce4e9a187",
+    installations: "cf702d99-5d5a-4973-ba9c-c4dbfae656a9" };
+  const UNIT = { "m³": "M3", m3: "M3", "m²": "M2", m2: "M2", kg: "KG", stk: "PCS", pcs: "PCS", m: "M" };
+  const STAGES = [["A1-A3", "A1to3"], ["C3", "C3"], ["C4", "C4"], ["D", "D"]];
+  const IND0 = { GWP: 0, ODP: 0, POCP: 0, AP: 0, EP: 0, ADPE: 0, ADPF: 0, PENR: 0, PER: 0, SENR: 0.0, SER: 0.0 };
+
+  // deterministic RFC-4122-shaped id from a string (FNV-1a based; uniqueness is what LCAbyg needs)
+  function uid() {
+    const s = Array.from(arguments).join("/");
+    const h = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b].map(seed => {
+      let x = seed >>> 0;
+      for (let i = 0; i < s.length; i++) { x ^= s.charCodeAt(i); x = Math.imul(x, 16777619) >>> 0; x ^= seed; }
+      return ("00000000" + (x >>> 0).toString(16)).slice(-8);
+    }).join("");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  }
+  const node = (k, f) => ({ Node: { [k]: f } });
+  const edge = (k, p, a, b) => ({ Edge: [{ [k]: p }, a, b] });
+  const unitOf = key => ({ foundation: "M", stairs: "PCS", topup_stairs: "PCS", doors: "PCS", balconies: "PCS" }[key] || "M2");
+
+  function productSpec(id, DB) {
+    const m = DB.materials[id];
+    const g = {}; for (const [k] of STAGES) g[k] = (m.gwp[k] || 0) / (m.per || 1);
+    if (m.unit === "m2R") { const kg = m.lambda * m.density; const o = {}; for (const k in g) o[k] = g[k] / kg; return ["KG", 1, o, kg]; }
+    const u = UNIT[m.unit] || "M2";
+    const mass = u === "M3" ? m.density : u === "M2" ? m.mass_per_m2 : u === "PCS" ? m.mass_per_pcs : 1;
+    return [u, mass || 1, g, 1];
+  }
+
+  function build(design, DB) {
+    const d = Object.assign({}, CF.DEFAULT_DESIGN, design || {});
+    const g = CF.geometry(d);
+    const comps = CF.components(d, g, DB).filter(c => !c.existing);
+    const en = CF.energy(d, g);
+    const F = { project: [], building: [], embodied_root: [], element_model: [], elements: [], element_category_edges: [],
+                constructions: [], constructions_extra: [], products: [], stages: [], operation: [], construction_process: [] };
+    const bid = uid("building", JSON.stringify(d));
+    F.project.push(node("Project", { id: EX.project }));
+    F.building.push(node("Building", { id: bid, name: { Danish: `CarbonForm ${d.structure}/${d.facade} ${g.floors} etager`, English: "CarbonForm export", German: "" },
+      address: "CarbonForm", owner: "CarbonForm", description: "Exported from CarbonForm (BR18 tabel 7 data)", building_type: "Other",
+      heated_floor_area: +g.gfa.toFixed(2), gross_area: +g.gfa.toFixed(2), gross_area_above_ground: +g.gfa.toFixed(2),
+      storeys_above_ground: g.floors, storeys_below_ground: 0, storey_height: d.storeyHeight, initial_year: CF.START_YEAR,
+      calculation_timespan: CF.PERIOD, calculation_mode: "SC", lca_advisor: "CarbonForm", building_regulation_version: "BR2018",
+      plot_area: +(g.footprintArea * 3).toFixed(1), outside_area: 0, energy_class: "LowEnergy" }),
+      edge("MainBuilding", uid("mb", bid), EX.project, bid), edge("BuildingToRoot", uid("btr", bid), bid, EX.root),
+      edge("BuildingToOperation", uid("bto", bid), bid, EX.op_main));
+    F.embodied_root.push(node("EmbodiedRoot", { id: EX.root }), edge("RootToModel", uid("rtm", bid), EX.root, EX.model),
+      edge("RootToConstructionProcess", uid("rtcp", bid), EX.root, EX.process));
+    F.element_model.push(node("ElementModel", { id: EX.model }), ...SUPER.map(s => edge("ParentTo", uid("pt", s), EX.model, s)));
+    F.construction_process.push(node("ConstructionProcess", { id: EX.process }));
+    F.operation.push(node("Operation", { id: EX.op_main, electricity_usage: +(en.elGrid / g.gfa).toFixed(3), heat_usage: +(en.dhGrid / g.gfa).toFixed(3), electricity_production: 0 }),
+      edge("ElectricitySource", uid("es", bid), EX.op_main, EX.el_source), edge("HeatingSource", uid("hs", bid), EX.op_main, EX.dh_source),
+      node("Operation", { id: EX.op_install, electricity_usage: 0, heat_usage: 0, electricity_production: 0.0 }),
+      edge("ElectricitySource", uid("es2", bid), EX.op_install, EX.el_source), edge("HeatingSource", uid("hs2", bid), EX.op_install, EX.el_source2));
+    const made = {};
+    function stageNode(id, mid, label, k, stage, unit, mass, gwp, src, ext, url) {
+      F.stages.push(node("Stage", { id, name: { Danish: `CF ${label} (${k})`, English: `CF ${label} (${k})`, German: "" }, comment: "", source: "User",
+        locked: true, valid_to: "2030-12-31", stage, stage_unit: unit, indicator_unit: unit, stage_factor: 1.0, mass_factor: mass, indicator_factor: 1.0,
+        external_source: src, external_id: ext, external_version: "2025", external_url: url || "", indicators: Object.assign({}, IND0, { GWP: gwp }) }));
+    }
+    function product(mid) {
+      if (made[mid]) return made[mid];
+      const m = DB.materials[mid];
+      const [unit, mass, gw, conv] = productSpec(mid, DB);
+      const pid = uid("product", mid);
+      F.products.push(node("Product", { id: pid, name: { Danish: `CF ${m.name_dk || m.label}`.slice(0, 120), English: `CF ${m.label}`, German: "" },
+        source: "User", comment: `${m.source} ${m.t7_id || m.uuid || ""}`, locked: true }));
+      for (const [k, st] of STAGES) {
+        if (Math.abs(gw[k]) < 1e-12 && st !== "A1to3") continue;
+        const sid = uid("stage", mid, st);
+        stageNode(sid, mid, m.label, k, st, unit, mass, gw[k], m.source || "", m.t7_id || m.uuid || "", m.url);
+        F.stages.push(edge("ProductToStage", { id: uid("pts", mid, st), enabled: true }, pid, sid), edge("Generic", uid("sc", mid, st), EX.stage_cat, sid));
+      }
+      return (made[mid] = [pid, unit, conv]);
+    }
+    function construction(key, unit, mats, life, qty) {
+      const eid = uid("element", key, bid), cid = uid("construction", key, bid), cat = CAT[key];
+      F.elements.push(node("Element", { id: eid, name: { Danish: `CF ${key}`, English: `CF ${key}`, German: "" }, source: "User", comment: "", enabled: true, active: true }),
+        edge("ElementToConstruction", { id: uid("etc", key, bid), amount: +qty.toFixed(4), enabled: true }, eid, cid));
+      F.element_category_edges.push(edge("CategoryToElement", { id: uid("cte", key, bid), enabled: true }, cat, eid));
+      F.constructions.push(node("Construction", { id: cid, name: { Danish: `CF ${key}` }, unit, source: "User", comment: "", layer: 1, locked: true }));
+      F.constructions_extra.push(edge("CategoryToConstruction", { id: uid("ctc", key, bid), layers: [1] }, cat, cid));
+      for (const mid of Object.keys(mats)) {
+        const [pid, punit, conv] = product(mid);
+        F.constructions.push(edge("ConstructionToProduct", { id: uid("ctp", key, mid, bid), amount: +(mats[mid] * conv).toFixed(6), unit: punit,
+          lifespan: life, demolition: false, enabled: true, delayed_start: 0 }, cid, pid));
+      }
+      return cid;
+    }
+    for (const c of comps) construction(c.key, unitOf(c.key), c.mats, c.life, c.qty);
+    if (d.mode !== "keep") {
+      const cid = construction("installations", "M2", {}, 100, g.gfa);
+      for (const mid of ["inst_drain", "inst_water", "inst_hvac"]) {
+        const m = DB.materials[mid], pid = uid("product", mid);
+        F.products.push(node("Product", { id: pid, name: { Danish: `CF ${m.name_dk}`, English: `CF ${m.label}`, German: "" }, source: "User",
+          comment: `BR18 standardværdi ${m.t7_id} x ${CF.PERIOD} år`, locked: true }));
+        for (const [k, st] of STAGES) {
+          const v = (m.gwp[k] || 0) * CF.PERIOD;
+          if (Math.abs(v) < 1e-12 && st !== "A1to3") continue;
+          const sid = uid("stage", mid, st);
+          stageNode(sid, mid, m.label, k, st, "M2", 1.0, v, "BR18 tabel 7 (2025)", m.t7_id, "");
+          F.stages.push(edge("ProductToStage", { id: uid("pts", mid, st), enabled: true }, pid, sid), edge("Generic", uid("sc", mid, st), EX.stage_cat, sid));
+        }
+        F.constructions.push(edge("ConstructionToProduct", { id: uid("ctp", "installations", mid, bid), amount: 1.0, unit: "M2", lifespan: 100,
+          demolition: false, enabled: true, delayed_start: 0 }, cid, pid));
+      }
+    }
+    return F;
+  }
+
+  /** Recompute an export with LCAbyg's rules (amount x stage factor; replacements = ceil(50/lifespan)-1). */
+  function recompute(F) {
+    const stages = {}, ps = {}, cp = {}, ec = {};
+    for (const lst of Object.values(F)) for (const it of lst) {
+      if (it.Node && it.Node.Stage) stages[it.Node.Stage.id] = [it.Node.Stage.stage, it.Node.Stage.indicators.GWP];
+      if (it.Edge) {
+        const [p, a, b] = it.Edge, kind = Object.keys(p)[0], pay = p[kind];
+        if (kind === "ProductToStage") (ps[a] = ps[a] || []).push(b);
+        if (kind === "ConstructionToProduct") (cp[a] = cp[a] || []).push([b, pay.amount, pay.lifespan]);
+        if (kind === "ElementToConstruction") ec[b] = pay.amount;
+      }
+    }
+    const out = { A1to3: 0, B4: 0, C3C4: 0, D: 0 };
+    for (const [cid, qty] of Object.entries(ec)) for (const [pid, amt, life] of cp[cid] || []) {
+      const n = Math.max(0, Math.ceil(CF.PERIOD / life) - 1), v = {};
+      for (const s of ps[pid] || []) v[stages[s][0]] = stages[s][1];
+      const a = qty * amt * (v.A1to3 || 0), c = qty * amt * ((v.C3 || 0) + (v.C4 || 0));
+      out.A1to3 += a; out.C3C4 += c; out.B4 += n * (a + c); out.D += qty * amt * (v.D || 0) * (1 + n);
+    }
+    return out;
+  }
+  root.LCAbygExport = { build, recompute };
+})(typeof self !== "undefined" ? self : this);
+</script>
+<script>
+const DB = {"_source": "BR18 bilag 2, tabel 7 (2025) generisk datagrundlag; supplementary ÖKOBAUDAT 2024-II where noted", "_extracted": "2026-10-12", "materials": {"concrete_c30": {"label": "Ready-mix concrete C30/37", "name_dk": "Fabriksbeton C30/37", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1477", "data_type": "Branche data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": 282.0, "C3": 6.72, "C4": 4.97, "D": -4.6}, "url": "https://www.epddanmark.dk/media/c3alzank/md-20012-da_rev1-dansk-beton-fabriksbetonforeningen.pdf", "density": 2255.0}, "concrete_c25": {"label": "Ready-mix concrete C25/30 (foundations, toppings)", "name_dk": "Fabriksbeton (C25/30) i eksponeringsklasserne X0 og XC1", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1433", "data_type": "Branche data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": 241.0, "C3": 6.73, "C4": 4.97, "D": -4.6}, "url": "https://www.epddanmark.dk/media/qoelm3vd/md-20011-da_rev1-dansk-beton-fabriksbetonforeningen.pdf", "density": 2246.0}, "rebar": {"label": "Reinforcing steel", "name_dk": "Armeringsstål", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1590", "data_type": "Dansk generisk data", "unit": "kg", "per": 1.0, "gwp": {"A1-A3": 1.144, "C3": 0.0, "C4": 0.0, "D": 0.1107}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 7850.0}, "steel_section": {"label": "Structural steel, rolled sections", "name_dk": "Konstruktionsstål, valsede profiler, lille forarbejdning", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1591", "data_type": "Dansk generisk data", "unit": "kg", "per": 1.0, "gwp": {"A1-A3": 1.6390000000000002, "C3": 0.05258, "C4": 0.04587000000000001, "D": -0.28440000000000004}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 7850.0}, "hollowcore": {"label": "Hollow-core slab element, 22 cm", "name_dk": "Huldæk element, 22 cm, 6-10 forspændingsliner", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1346", "data_type": "Branche data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 49.8, "C3": 1.04, "C4": 0.76, "D": -0.705}, "url": "https://www.epddanmark.dk/media/ksolk4dz/md-20017-da_rev2-betonelement-foreningen.pdf", "mass_per_m2": 344.6}, "precast_wall20": {"label": "Precast concrete wall element, 20 cm", "name_dk": "Beton vægelementer, 20 cm tyk væg med 5-15 kg armering (11% udsparinger)", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1389", "data_type": "Branche data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 66.9, "C3": 1.28, "C4": 0.93, "D": -1.01}, "url": "https://www.epddanmark.dk/media/oq0dzm1j/md-20015-da_rev1-betonelement-foreningen.pdf", "mass_per_m2": 426.4}, "precast_wall15": {"label": "Precast concrete wall element, 15 cm", "name_dk": "Beton vægelementer, 15 cm tyk væg med 5-15 kg armering  (11% udsparinger)", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1385", "data_type": "Branche data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 53.1, "C3": 0.965, "C4": 0.7, "D": -0.787}, "url": "https://www.epddanmark.dk/media/oq0dzm1j/md-20015-da_rev1-betonelement-foreningen.pdf", "mass_per_m2": 320.9}, "clt": {"label": "Cross-laminated timber (CLT)", "name_dk": "Krydslamineret træ, CLT (Forbrænding EoL)", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1318", "data_type": "Branche data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": -664.0, "C3": 744.0, "C4": 0.0, "D": -387.0}, "url": "https://www.epddanmark.dk/media/tmwhxyym/md-20007-en_rev1_tr%c3%a6dk.pdf", "density": 470.0}, "glulam": {"label": "Glulam, spruce/pine", "name_dk": "Limtræs-produkter af fyr og gran, (Forbrænding EoL)", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1339", "data_type": "Branche data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": -610.0, "C3": 743.0, "C4": 0.0, "D": -395.0}, "url": "https://www.epddanmark.dk/media/hzjhj3s2/md-20005-en_rev1_tr%c3%a6dk.pdf", "density": 500.0}, "timber": {"label": "Structural timber, sawn and dried", "name_dk": "Konstruktionstræ af fyr og gran, Savede og tørrede (Forbrænding EoL)", "source": "BR18 tabel 7 (2025)", "t7_id": "#B1489", "data_type": "Branche data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": -680.0, "C3": 728.0, "C4": 0.0, "D": -371.0}, "url": "https://www.epddanmark.dk/media/vf0jy3ur/md-20002-en-tr%C3%A6-dk-c-o-tr%C3%A6-og-m%C3%B8belindustrien.pdf", "density": 456.0}, "larch": {"label": "Larch (cladding)", "name_dk": "Træ, lærk ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G0221", "data_type": "Generisk data", "unit": "m³", "per": 1.0, "gwp": {"A1-A3": -902.763660690763, "C3": 1206.57750245421, "C4": 0.0, "D": -369.48173268008}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/9d1d96af-3f9b-41fb-bd33-43ec9e2fd1fd?version=20.23.050", "density": 660.8}, "brick": {"label": "Facing brick (yellow/brown)", "name_dk": "Teglsten, gule, rosé, brune eller lign. farvenuancer", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1508", "data_type": "Dansk generisk data", "unit": "kg", "per": 1.0, "gwp": {"A1-A3": 0.265375, "C3": 0.0034320000000000006, "C4": 0.0001716, "D": -0.0023760000000000005}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 1800.0}, "fibre_cement": {"label": "Fibre-cement board", "name_dk": "Fibercementplade", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1514", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 12.870000000000001, "C3": 0.0, "C4": 0.24860000000000002, "D": 0.0}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "mass_per_m2": 14.4}, "etics_render": {"label": "ETICS adhesive + silicate render", "name_dk": "ETICS-limning og belægning af silikatdispersionspuds ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G1251", "data_type": "Generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 5.55288613540022, "C3": 0.0, "C4": 0.200772919668603, "D": 0.0}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/2d42602d-9913-43ed-8703-d953f7854bca?version=20.23.050", "mass_per_m2": 12.48}, "mw_facade": {"label": "Mineral wool, hard, class 34", "name_dk": "Mineraluld, hård isolering, kl. 34", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1536", "data_type": "Dansk generisk data", "unit": "m2R", "per": 1.0, "gwp": {"A1-A3": 1.2429999999999999, "C3": 0.0, "C4": 0.05346, "D": -0.06552000000000001}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 60.0, "lambda": 0.034}, "mw_roof": {"label": "Mineral wool, hard, class 37", "name_dk": "Mineraluld, hård isolering, kl. 37", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1537", "data_type": "Dansk generisk data", "unit": "m2R", "per": 1.0, "gwp": {"A1-A3": 1.5015000000000003, "C3": 0.0, "C4": 0.016516500000000003, "D": -0.048762}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 30.0, "lambda": 0.037}, "wood_fibre": {"label": "Wood-fibre insulation board", "name_dk": "Træfiberisolering, plade", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1627", "data_type": "Dansk generisk data", "unit": "m2R", "per": 1.0, "gwp": {"A1-A3": -2.142, "C3": 3.2230000000000003, "C4": 0.0002739, "D": -0.18180000000000002}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 50.0, "lambda": 0.04}, "eps": {"label": "EPS insulation, grey, 60 kPa", "name_dk": "EPS isolering, grå, 60 kPa", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1560", "data_type": "Dansk generisk data", "unit": "m2R", "per": 1.0, "gwp": {"A1-A3": 1.518, "C3": 1.5070000000000003, "C4": 2.7104000000000007e-05, "D": -0.04158}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 12.9, "lambda": 0.031}, "cellulose": {"label": "Cellulose (paper wool) insulation", "name_dk": "Papiruldsisolering, granulat", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1623", "data_type": "Dansk generisk data", "unit": "kg", "per": 1.0, "gwp": {"A1-A3": -1.19097, "C3": 1.7820000000000003, "C4": 0.0, "D": -0.4275}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "density": 43.75, "lambda": 0.039}, "window_wood": {"label": "Timber window, triple glazed", "name_dk": "Trævindue med 3-lags rude", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1635", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 51.667, "C3": 20.79, "C4": 1.4190000000000003, "D": -17.5}, "url": "https://www.epddanmark.dk/media/4pnfnax3/md-22039-da.pdf", "mass_per_m2": 34.2}, "window_woodalu": {"label": "Timber-aluminium window, triple glazed", "name_dk": "Træ-alu vindue med 3-lags rude", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1634", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 90.58500000000002, "C3": 20.680000000000003, "C4": 1.1990000000000003, "D": -29.1}, "url": "https://www.epddanmark.dk/media/m2bfi4ei/md-22040-da.pdf", "mass_per_m2": 36.4}, "window_pvc": {"label": "PVC window, triple glazed", "name_dk": "Plastvindue i hård PVC med stålindlæg i profilet og 3-lags rude", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1632", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 101.233, "C3": 10.879000000000001, "C4": 0.5368, "D": -23.2}, "url": "https://www.epddanmark.dk/media/44tddsrk/md-22041-da.pdf", "mass_per_m2": 38.7}, "curtain_wall": {"label": "Curtain wall, steel, triple glazed", "name_dk": "Curtain wall facade med 3-lags ruder, stål ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G0111", "data_type": "Generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 95.9285807261742, "C3": 6.21300386607937, "C4": 0.450596485309465, "D": -13.9545954787585}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/77dbec35-a9ed-462f-91dc-c26fce408a2b?version=20.23.050", "mass_per_m2": 21.4}, "roofing_felt": {"label": "Roofing felt, top + base layer", "name_dk": "Tagpap, overpap + underpap", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1501", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 5.687, "C3": 26.510000000000005, "C4": 0.011000000000000001, "D": -8.270999999999999}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "mass_per_m2": 12.764285714285712}, "roof_tiles": {"label": "Clay roof tiles, red", "name_dk": "Tagsten, tegl, røde", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1497", "data_type": "Dansk generisk data", "unit": "kg", "per": 1.0, "gwp": {"A1-A3": 0.30910000000000004, "C3": 0.0007843, "C4": 0.00015509999999999998, "D": -0.003978000000000001}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "mass_per_m2": 52.5}, "gypsum": {"label": "Gypsum board, standard", "name_dk": "Gipsplade, standard", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1515", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 1.7270000000000003, "C3": 0.40700000000000003, "C4": 0.36850000000000005, "D": -0.006030000000000001}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "mass_per_m2": 9.1}, "pv": {"label": "PV panel, monocrystalline", "name_dk": "Solcellepanel, monokrystallinsk", "source": "BR18 tabel 7 (2025)", "t7_id": "#D1604", "data_type": "Dansk generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": 174.9, "C3": 3.5530000000000004, "C4": 0.07953, "D": -13.1}, "url": "https://vbn.aau.dk/da/publications/udvikling-af-dansk-generisk-lca-data?", "mass_per_m2": 19.0}, "stair": {"label": "Concrete stair, one storey", "name_dk": "Betontrappe, etagehøj ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G0420", "data_type": "Generisk data", "unit": "stk", "per": 1.0, "gwp": {"A1-A3": 265.025463511954, "C3": 14.0458786852313, "C4": 0.0, "D": -2.74236241619471}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/2632f4e8-7671-4d87-a8bc-9defdb54d117?version=20.23.050", "mass_per_pcs": 1965.0}, "door_steel": {"label": "Steel door (apartment entrance)", "name_dk": "Dør, stål, indv/udv/brand/røg mv ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G1222", "data_type": "Generisk data", "unit": "stk", "per": 1.0, "gwp": {"A1-A3": 255.7, "C3": 0.0, "C4": 0.224, "D": 103.0}, "url": "https://oekobaudat.de/OEKOBAU.DAT/datasetdetail/process.xhtml?uuid=b9aa9ecd-e541-4ec7-9f33-47b865286aa9&version=00.01.000&stock=OBD_2023_I&lang=en", "mass_per_pcs": 73.046}, "parquet": {"label": "Multi-layer parquet", "name_dk": "Parket, flerlag (tykkelse 0,01 m) ", "source": "BR18 tabel 7 (2025)", "t7_id": "#G1166", "data_type": "Generisk data", "unit": "m²", "per": 1.0, "gwp": {"A1-A3": -3.86, "C3": 11.88, "C4": 0.0, "D": -3.333}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/ed739600-fbd0-4b3e-b577-453778a5270e?version=20.23.050", "mass_per_m2": 6.5}, "inst_drain": {"label": "Installations standard value: drainage (multi-storey housing)", "name_dk": "Etageboliger, afløb", "source": "BR18 tabel 7 (2025)", "t7_id": "#S0007", "data_type": "Standardværdi", "unit": "m2yr", "per": 1.0, "gwp": {"A1-A3": 0.056, "C3": 0.064, "C4": 0.0, "D": -0.048}, "url": "https://vbn.aau.dk/da/publications/klimap%C3%A5virkning-fra-nybyggeri-analytisk-grundlag-til-fastl%C3%A6ggelse?", "mass_per_m2": 0.46}, "inst_water": {"label": "Installations standard value: water (multi-storey housing)", "name_dk": "Etageboliger, vand", "source": "BR18 tabel 7 (2025)", "t7_id": "#S0008", "data_type": "Standardværdi", "unit": "m2yr", "per": 1.0, "gwp": {"A1-A3": 0.05, "C3": 0.01, "C4": 0.0, "D": -0.02}, "url": "https://vbn.aau.dk/da/publications/klimap%C3%A5virkning-fra-nybyggeri-analytisk-grundlag-til-fastl%C3%A6ggelse?", "mass_per_m2": 0.52}, "inst_hvac": {"label": "Installations standard value: heating, ventilation, cooling (multi-storey housing)", "name_dk": "Etageboliger,varme, ventilation og køl", "source": "BR18 tabel 7 (2025)", "t7_id": "#S0009", "data_type": "Standardværdi", "unit": "m2yr", "per": 1.0, "gwp": {"A1-A3": 0.394, "C3": 0.081, "C4": 0.0, "D": -0.222}, "url": "https://vbn.aau.dk/da/publications/klimap%C3%A5virkning-fra-nybyggeri-analytisk-grundlag-til-fastl%C3%A6ggelse?", "mass_per_m2": 3.59}, "green_roof": {"label": "Extensive green roof (ÖKOBAUDAT)", "source": "ÖKOBAUDAT 2024-II", "uuid": "7d3f45ad-d97f-467e-ae88-80e125400622", "unit": "m2", "per": 1.0, "gwp": {"A1-A3": 4.87633164875902, "A4": 0.839842736520085, "C1": 0.000219877955857605, "C2": 0.434392312262852, "C3": 5.51087461676585, "C4": 16.2996189948986, "D": -4.18361233878574}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/7d3f45ad-d97f-467e-ae88-80e125400622?version=20.26.070", "mass_per_m2": 100.0}, "truck": {"label": "Truck transport (ÖKOBAUDAT, per 1000 kg·km)", "source": "ÖKOBAUDAT 2024-II", "uuid": "bb74d2a2-249a-4245-a1bb-7bde61f2f613", "unit": "kgkm", "per": 1000.0, "gwp": {"A4": 0.11067136298967}, "url": "https://www.oekobaudat.de/OEKOBAU.DAT/resource/processes/bb74d2a2-249a-4245-a1bb-7bde61f2f613?version=20.26.070"}}};
+const CF = window.CarbonForm;
+const $ = s => document.querySelector(s);
+const fmt = (v, d = 2) => v.toLocaleString("en", { minimumFractionDigits: d, maximumFractionDigits: d });
+const MODCOL = { A1A3: "var(--p1)", B4: "var(--p2)", B6: "var(--p3)", C3C4: "var(--p4)" };
+const MODLAB = { A1A3: "Production A1–A3", B4: "Replacements B4", B6: "Operation B6", C3C4: "End of life C3–C4" };
+const PARTCOL = { structure: "#3987e5", foundation: "#256abf", facade: "#d95926", windows: "#199e70", roof: "#c98500",
+                  interior: "#9085e9", installations: "#d55181", balconies: "#5598e7", energy: "#e66767", operation: "#7d867e" };
+const PARTLAB = { structure: "Structure", foundation: "Foundations", facade: "Facade", windows: "Windows", roof: "Roof",
+                  interior: "Interior", installations: "Installations", balconies: "Balconies", energy: "PV", operation: "Operation (B6)" };
+
+// ------------------------------------------------------------------ state + controls
+let design = Object.assign({}, CF.DEFAULT_DESIGN);
+const SLIDERS = {
+  length: [20, 70, 1, "m"], depth: [10, 16, 0.5, "m"], floors: [2, 12, 1, ""], twist: [0, 6, 0.5, "°/floor"],
+  setback: [0, 3, 0.5, "m"], wwr: [0.15, 0.6, 0.01, ""], pv: [0, 1, 0.05, ""], topUpFloors: [0, 4, 1, ""] };
+const SLLAB = { length: "Length", depth: "Wing depth", floors: "Storeys", twist: "Twist", setback: "Top setback", wwr: "Window ratio",
+                pv: "PV roof cover", topUpFloors: "Timber top-up storeys" };
+const SEGS = Object.assign({}, CF.OPTIONS, { balconies: [true, false] });
+const SEGLAB = Object.assign({}, CF.LABELS, { new: "New build", renovate: "Renovate 1970s", keep: "Keep as is", true: "Balconies", false: "No balconies" });
+
+function buildControls() {
+  document.querySelectorAll(".seg").forEach(el => {
+    const k = el.dataset.k;
+    el.innerHTML = "";
+    for (const v of SEGS[k]) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = SEGLAB[v] || v; b.dataset.v = v;
+      b.onclick = () => { set({ [k]: v }); };
+      el.appendChild(b);
+    }
+  });
+  for (const [k, [mn, mx, st, u]] of Object.entries(SLIDERS)) {
+    const el = $("#sl-" + k); if (!el) continue;
+    el.innerHTML = `<label for="in-${k}">${SLLAB[k]}</label><output id="out-${k}"></output>
+      <input id="in-${k}" type="range" min="${mn}" max="${mx}" step="${st}">`;
+    el.querySelector("input").oninput = e => set({ [k]: +e.target.value });
+  }
+}
+function syncControls() {
+  document.querySelectorAll(".seg").forEach(el => {
+    const k = el.dataset.k;
+    el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(design[k]) === b.dataset.v));
+  });
+  for (const k of Object.keys(SLIDERS)) {
+    const i = $("#in-" + k); if (!i) continue;
+    i.value = design[k];
+    const u = SLIDERS[k][3];
+    $("#out-" + k).textContent = (k === "wwr" || k === "pv") ? Math.round(design[k] * 100) + " %" : `${design[k]} ${u}`.trim();
+  }
+  $("#sl-topUpFloors").hidden = design.mode !== "renovate";
+  ["structure"].forEach(k => document.querySelector(`.seg[data-k="${k}"]`).closest(".grp").style.opacity = design.mode === "new" ? 1 : .45);
+}
+
+// ------------------------------------------------------------------ compute + dashboard
+let R = null, S = null;
+function set(patch, quiet) {
+  if (!quiet) autoFrame = true;
+  design = Object.assign({}, design, patch);
+  if (design.mode !== "new") design.footprint = "bar";
+  compute();
+  syncControls();
+  if (!quiet) target = targetFrom(design, R);
+}
+function compute() {
+  R = CF.evaluate(design, DB);
+  S = CF.scenarios(Object.assign({}, design), DB);
+  dash();
+}
+function dash() {
+  const r = R;
+  $("#hero").innerHTML = fmt(r.total) + "<small>kg CO₂e/m²/yr</small>";
+  $("#chip").innerHTML = r.pass ? `<span class="chip ok">✓ Meets BR18 2025 limit (7.5)</span>`
+                                : `<span class="chip no">✕ Above BR18 2025 limit (7.5)</span>`;
+  gauge(r.total);
+  const kp = [
+    ["Floor area", fmt(r.geometry.gfa, 0) + " m²"],
+    ["Construction A4–A5", fmt(r.construction) + (r.passConstruction ? " ✓" : " ✕") + " / 1.5"],
+    ["Up-front carbon A1–A5", fmt(r.upfront_m2, 0) + " kg/m²"],
+    ["Whole life, 50 yr", fmt(r.tonnes, 0) + " t CO₂e"],
+    ["Heating demand", fmt(r.energy.heat_m2, 1) + " kWh/m²/yr"],
+    ["Module D (outside limit)", fmt(r.perM2Yr.D)],
+  ];
+  $("#kpis").innerHTML = kp.map(([a, b]) => `<span>${a}</span><b>${b}</b>`).join("");
+  modules(r); parts(r); timeline(S); passport(r);
+  $("#hudv").innerHTML = fmt(r.total) + "<small>kg CO₂e/m²/yr</small>";
+  $("#hudbar").style.width = Math.min(100, r.total / 12 * 100) + "%"; $("#hudbar").style.background = r.pass ? "var(--good)" : "var(--bad)";
+  $("#hudchip").innerHTML = $("#chip").innerHTML;
+  $("#srcnote").textContent = `${Object.keys(DB.materials).length} datasets · reference period 50 years · per m² floor area`;
+}
+function gauge(v) {
+  const W = 330, x0 = 10, x1 = 320, max = 12;
+  const X = t => x0 + (x1 - x0) * Math.min(t, max) / max;
+  const ticks = [[5.8, "2029", "end", 14], [6.4, "2027", "start", 14], [7.5, "2025 limit 7.5", "middle", 56], [12, "2023", "end", 14]];
+  let s = `<rect x="${x0}" y="26" width="${x1 - x0}" height="10" rx="5" fill="#1d2320"/>`;
+  s += `<rect x="${x0}" y="26" width="${Math.max(10, X(v) - x0)}" height="10" rx="5" fill="${v <= 7.5 ? "var(--good)" : "var(--bad)"}"/>`;
+  for (const [t, l, a, y] of ticks) s += `<line x1="${X(t)}" x2="${X(t)}" y1="20" y2="42" stroke="#f2f4ef" stroke-opacity=".55" stroke-width="1"/>
+    <text x="${X(t) + (a === "end" ? -3 : a === "start" ? 3 : 0)}" y="${y}" text-anchor="${a}" font-size="9.5">${t === 7.5 ? l : l + " · " + t}</text>`;
+  s += `<circle cx="${X(v)}" cy="31" r="6" fill="#f2f4ef" stroke="#0b0d0c" stroke-width="2"/>`;
+  $("#gauge").innerHTML = s;
+}
+function modules(r) {
+  const keys = ["A1A3", "B4", "B6", "C3C4"];
+  const vals = keys.map(k => Math.max(0, r.perM2Yr[k]));
+  const neg = r.perM2Yr.A1A3 < 0 ? r.perM2Yr.A1A3 : 0;
+  const tot = vals.reduce((a, b) => a + b, 0) || 1;
+  const W = 310, x0 = 10;
+  let x = x0, s = "";
+  keys.forEach((k, i) => {
+    const w = Math.max(0, W * vals[i] / Math.max(tot, 1e-9)) - (i < keys.length - 1 ? 2 : 0);
+    if (w > 0.5) s += `<rect data-tip="${MODLAB[k]}: ${fmt(r.perM2Yr[k])} kg/m²/yr" x="${x}" y="14" width="${w}" height="22" rx="${i === 0 || i === 3 ? 4 : 0}" fill="${MODCOL[k]}"/>`;
+    x += w + 2;
+  });
+  if (neg < 0) s += `<text x="10" y="56" font-size="10.5">Stored biogenic carbon in A1–A3: ${fmt(neg)} (released again in C3)</text>`;
+  else s += `<text x="10" y="56" font-size="10.5">Largest: ${MODLAB[keys[vals.indexOf(Math.max(...vals))]]} · ${fmt(Math.max(...vals))}</text>`;
+  $("#mods").innerHTML = s;
+  $("#modleg").innerHTML = keys.map(k => `<span><i style="background:${MODCOL[k]}"></i>${MODLAB[k]} ${fmt(r.perM2Yr[k])}</span>`).join("");
+}
+function parts(r) {
+  const den = r.geometry.gfa * CF.PERIOD;
+  const arr = Object.entries(r.byGroup).map(([k, v]) => [k, v / den]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 7);
+  const mx = Math.max(...arr.map(a => Math.abs(a[1])), 0.01);
+  let s = "";
+  arr.forEach(([k, v], i) => {
+    const y = 6 + i * 20, w = 170 * Math.abs(v) / mx;
+    s += `<text x="0" y="${y + 11}" font-size="11">${PARTLAB[k] || k}</text>
+          <rect data-tip="${PARTLAB[k] || k}: ${fmt(v)} kg/m²/yr" x="${110 + (v < 0 ? 0 : 0)}" y="${y + 2}" width="${Math.max(2, w)}" height="12" rx="4"
+           fill="${PARTCOL[k] || "#7d867e"}" ${v < 0 ? 'opacity=".55"' : ""}/>
+          <text x="${116 + Math.max(2, w)}" y="${y + 11}" font-size="10.5" style="fill:var(--ink)">${fmt(v)}</text>`;
+  });
+  $("#parts").innerHTML = s;
+}
+function timeline(S) {
+  const W = 330, H = 170, l = 34, r = 8, t = 10, b = 22;
+  const lines = [["keep", "Keep 1970s block", "#7d867e"], ["renovate", "Renovate", "#b7f36a"], ["newBuild", "Demolish + new", "#3987e5"]];
+  const all = lines.flatMap(([k]) => S.timelines[k]);
+  const mx = Math.max(...all) * 1.05, mn = Math.min(0, ...all);
+  const X = i => l + (W - l - r) * i / CF.PERIOD, Y = v => t + (H - t - b) * (1 - (v - mn) / (mx - mn));
+  let s = "";
+  const step = niceStep(mx / 4);
+  for (let v = 0; v <= mx; v += step) s += `<line x1="${l}" x2="${W - r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#232926"/>
+      <text x="${l - 4}" y="${Y(v) + 3}" text-anchor="end" font-size="9">${Math.round(v / 1000).toLocaleString("en")}</text>`;
+  for (const yr of [0, 10, 20, 30, 40, 50]) s += `<text x="${X(yr)}" y="${H - 6}" text-anchor="middle" font-size="9">${CF.START_YEAR + yr}</text>`;
+  s += `<text x="2" y="9" font-size="9">t CO₂e</text>`;
+  for (const [k, , c] of lines) {
+    const d = S.timelines[k].map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    s += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = S.timelines[k][CF.PERIOD];
+    s += `<circle cx="${X(CF.PERIOD)}" cy="${Y(last)}" r="4" fill="${c}" stroke="#121514" stroke-width="2" data-tip="${k}: ${Math.round(last / 1000)} t"/>`;
+  }
+  const be = S.breakEvenRenovateVsKeep;
+  if (be) { const right = X(be) > W * 0.6;
+    s += `<line x1="${X(be)}" x2="${X(be)}" y1="${t}" y2="${H - b}" stroke="#b7f36a" stroke-opacity=".5"/>
+     <text x="${X(be) + (right ? -4 : 4)}" y="${t + 10}" text-anchor="${right ? "end" : "start"}" font-size="9.5" style="fill:var(--ink)">renovation below keep from ${CF.START_YEAR + be}</text>`; }
+  $("#tl").innerHTML = s;
+  $("#tlleg").innerHTML = lines.map(([k, lab, c]) => `<span><i style="background:${c}"></i>${lab} ${Math.round(S.timelines[k][CF.PERIOD] / 1000)} t</span>`).join("");
+}
+function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))); const n = x / p; return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p; }
+function passport(r) {
+  const rows = Object.entries(r.byMaterial).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 10);
+  $("#pass").innerHTML = "<tr><td>Material (BR18 table 7)</td><td class='n'>t CO₂e</td></tr>" +
+    rows.map(([id, v]) => `<tr><td>${DB.materials[id].label}</td><td class="n">${fmt(v / 1000, 1)}</td></tr>`).join("");
+}
+document.addEventListener("pointermove", e => {
+  const el = e.target.closest && e.target.closest("[data-tip]"), tip = $("#tip");
+  if (!el) { tip.hidden = true; return; }
+  tip.hidden = false; tip.textContent = el.dataset.tip; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px";
+});
+
+// ------------------------------------------------------------------ 3D
+const canvas = $("#gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07090d);
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: "varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }",
+  fragmentShader: `varying float h; void main(){
+    vec3 zen = vec3(0.02,0.035,0.07), mid = vec3(0.06,0.10,0.17), hor = vec3(0.42,0.24,0.14), gnd = vec3(0.05,0.04,0.035);
+    vec3 c = h > 0.0 ? mix(hor, mix(mid, zen, smoothstep(0.25, 0.9, h)), smoothstep(0.0, 0.25, h)) : mix(hor, gnd, smoothstep(0.0, 0.08, -h));
+    gl_FragColor = vec4(pow(c, vec3(0.9)), 1.); }`
+}));
+scene.add(skyDome);
+scene.fog = new THREE.Fog(0x2a1c14, 260, 780);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 2000);
+camera.position.set(95, 62, 120);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.target.set(0, 12, 0); controls.maxPolarAngle = Math.PI * 0.48; controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+scene.add(new THREE.HemisphereLight(0x8fb2ff, 0x140d08, 0.42));
+const sun = new THREE.DirectionalLight(0xffc68a, 1.9);
+sun.position.set(-140, 55, 90); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -160, right: 160, top: 160, bottom: -160, near: 10, far: 600 });
+scene.add(sun);
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.75, 0.6, 0.82);
+composer.addPass(bloom);
+
+// ground + context
+const ground = new THREE.Mesh(new THREE.CircleGeometry(600, 64), new THREE.MeshStandardMaterial({ color: 0x0d100e, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(600, 120, 0x1c211e, 0x131715); grid.position.y = 0.02; grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+(function trees() {
+  const g = new THREE.Group(), trunkM = new THREE.MeshStandardMaterial({ color: 0x2b2219, roughness: 1 });
+  const leafM = new THREE.MeshStandardMaterial({ color: 0x24402b, roughness: .9, flatShading: true });
+  let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 70; i++) {
+    const a = rnd() * Math.PI * 2, rr = 120 + rnd() * 200, x = Math.cos(a) * rr, z = Math.sin(a) * rr, h = 6 + rnd() * 8;
+    const tr = new THREE.Mesh(new THREE.CylinderGeometry(.25, .35, h * .4, 6), trunkM); tr.position.set(x, h * .2, z);
+    const cr = new THREE.Mesh(new THREE.IcosahedronGeometry(h * .32, 0), leafM); cr.position.set(x, h * .55, z); cr.scale.y = 1.25;
+    cr.castShadow = tr.castShadow = true; g.add(tr, cr);
+  }
+  scene.add(g);
+})();
+
+// procedural facade textures (one bay = 3.6 m wide x 1 storey)
+const texCache = {};
+function facadeTex(kind, wwr) {
+  const key = kind + Math.round(wwr * 100);
+  if (texCache[key]) return texCache[key];
+  const c = document.createElement("canvas"); c.width = c.height = 256; const x = c.getContext("2d");
+  const e = document.createElement("canvas"); e.width = e.height = 256; const ex = e.getContext("2d");
+  const base = { brick: "#8a4a32", wood: "#a1764a", fibrecement: "#9aa0a3", render: "#d9d4c7", existing: "#8d8a82" }[kind];
+  x.fillStyle = base; x.fillRect(0, 0, 256, 256);
+  if (kind === "brick" || kind === "existing") { for (let r = 0; r < 64; r++) for (let q = -1; q < 17; q++) {
+      x.fillStyle = `hsl(${12 + Math.random() * 8},${kind === "brick" ? 45 : 5}%,${28 + Math.random() * 10}%)`;
+      x.fillRect(q * 16 + (r % 2) * 8 + 1, r * 4 + 1, 14, 3); } }
+  if (kind === "wood") for (let q = 0; q < 52; q++) { x.fillStyle = `hsl(28,${35 + Math.random() * 15}%,${30 + Math.random() * 14}%)`; x.fillRect(q * 5, 0, 4.4, 256); }
+  if (kind === "fibrecement") { x.strokeStyle = "#6b7174"; x.lineWidth = 1.5; for (let q = 0; q < 8; q++) for (let r = 0; r < 4; r++) x.strokeRect(q * 32, r * 64, 32, 64); }
+  if (kind === "render") { for (let i = 0; i < 4000; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * .05})`; x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); } }
+  // tile = 4 bays x 2 storeys; window width so window area / bay area == wwr (window height 55 % of storey)
+  const wh = 0.55, ww = Math.min(0.92, wwr / wh);
+  ex.fillStyle = "#000"; ex.fillRect(0, 0, 256, 256);
+  let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let by = 0; by < 2; by++) for (let bx = 0; bx < 4; bx++) {
+    const cw = 64, ch = 128, wx = bx * cw + (1 - ww) / 2 * cw, wy = by * ch + 0.22 * ch, W = ww * cw, Hh = wh * ch;
+    x.fillStyle = "#0d1014"; x.fillRect(wx - 2, wy - 2, W + 4, Hh + 4);
+    const gr = x.createLinearGradient(0, wy, 0, wy + Hh); gr.addColorStop(0, "#33475a"); gr.addColorStop(1, "#10161d");
+    x.fillStyle = gr; x.fillRect(wx, wy, W, Hh);
+    const lit = rnd();
+    if (lit > 0.42) {                                      // ~60 % of flats lit at dusk, warm 2700-3500 K tones
+      ex.fillStyle = lit > 0.85 ? "#ffd6a0" : lit > 0.6 ? "#ffb35c" : "#d98a3c";
+      ex.globalAlpha = 0.35 + 0.5 * rnd(); ex.fillRect(wx + 2, wy + 2, W - 4, Hh - 4); ex.globalAlpha = 1;
+    }
+  }
+  const t = new THREE.CanvasTexture(c), te = new THREE.CanvasTexture(e);
+  [t, te].forEach(q => { q.wrapS = q.wrapT = THREE.RepeatWrapping; q.encoding = THREE.sRGBEncoding; q.anisotropy = 8; });
+  texCache[key] = { map: t, emissive: te };
+  return texCache[key];
+}
+let building = new THREE.Group(); scene.add(building);
+const slabMat = new THREE.MeshStandardMaterial({ color: 0x2a2f2c, roughness: .8 });
+const timberMat = new THREE.MeshStandardMaterial({ color: 0xc89a62, roughness: .7 });
+const roofMats = { flat: new THREE.MeshStandardMaterial({ color: 0x222524, roughness: .95 }),
+                   green: new THREE.MeshStandardMaterial({ color: 0x3f6b2f, roughness: 1 }),
+                   pitched: new THREE.MeshStandardMaterial({ color: 0x8a3b26, roughness: .8 }) };
+const pvMat = new THREE.MeshStandardMaterial({ color: 0x0f1d3a, roughness: .25, metalness: .6, emissive: 0x0a1630, emissiveIntensity: .4 });
+const balcMat = new THREE.MeshStandardMaterial({ color: 0x9aa09c, roughness: .6 });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x88aabb, transparent: true, opacity: .25, roughness: .1 });
+
+function shapeOf(fp, ox, oz) {
+  const s = new THREE.Shape(fp.outer.map(([a, b]) => new THREE.Vector2(a - ox, b - oz)));
+  for (const h of fp.holes) s.holes.push(new THREE.Path(h.map(([a, b]) => new THREE.Vector2(a - ox, b - oz))));
+  return s;
+}
+function rebuild(p) {
+  scene.remove(building); building.traverse(o => o.geometry && o.geometry.dispose());
+  building = new THREE.Group(); scene.add(building);
+  const d = Object.assign({}, design, p);
+  const fp = CF.footprint(d);
+  const xs = fp.outer.map(q => q[0]), zs = fp.outer.map(q => q[1]);
+  const ox = (Math.min(...xs) + Math.max(...xs)) / 2, oz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const shape = shapeOf(fp, ox, oz);
+  const h = d.storeyHeight, nF = Math.max(1, d.floors + (d.mode === "renovate" ? d.topUpFloors : 0));
+  const facade = d.mode === "keep" ? "existing" : d.facade;
+  const tex = facadeTex(facade, d.mode === "keep" ? 0.22 : d.wwr);
+  const fm = new THREE.MeshStandardMaterial({ map: tex.map, emissiveMap: tex.emissive, emissive: 0xffffff, emissiveIntensity: dusk * 1.15, roughness: .85 });
+  fm.map.repeat.set(1 / 14.4, 1 / (2 * h)); fm.emissiveMap.repeat.set(1 / 14.4, 1 / (2 * h));
+  const topTimber = d.mode === "renovate" ? d.topUpFloors : 0;
+  const tm = topTimber ? new THREE.MeshStandardMaterial({ map: facadeTex("wood", d.wwr).map, emissiveMap: facadeTex("wood", d.wwr).emissive,
+                 emissive: 0xffffff, emissiveIntensity: dusk * 1.4, roughness: .8 }) : null;
+  if (tm) { tm.map.repeat.set(1 / 14.4, 1 / (2 * h)); tm.emissiveMap.repeat.set(1 / 14.4, 1 / (2 * h)); }
+  const floorsVisible = p.floorsAnim != null ? p.floorsAnim : nF;
+  for (let i = 0; i < Math.ceil(floorsVisible); i++) {
+    const frac = Math.min(1, floorsVisible - i);
+    const isTop = i === nF - 1 && d.setback > 0;
+    const sh = isTop ? shapeOf({ outer: inset(fp.outer, d.setback), holes: fp.holes }, ox, oz) : shape;
+    const g = new THREE.ExtrudeGeometry(sh, { depth: h * 0.93 * frac, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(g, [roofMats.flat, i >= nF - topTimber ? tm : fm]);
+    mesh.position.y = i * h; mesh.castShadow = mesh.receiveShadow = true;
+    const sg = new THREE.ExtrudeGeometry(sh, { depth: h * 0.07, bevelEnabled: false }); sg.rotateX(-Math.PI / 2);
+    const slab = new THREE.Mesh(sg, d.structure === "timber" && d.mode === "new" ? timberMat : slabMat); slab.position.y = i * h + h * 0.93 * frac;
+    const fl = new THREE.Group(); fl.add(mesh, slab);
+    fl.rotation.y = THREE.MathUtils.degToRad(d.twist * i);
+    if (d.balconies && i > 0) addBalconies(fl, fp, ox, oz, i * h, d);
+    building.add(fl);
+  }
+  // roof
+  const topY = Math.ceil(floorsVisible) * h;
+  const rot = THREE.MathUtils.degToRad(d.twist * (Math.ceil(floorsVisible) - 1));
+  const rg = new THREE.Group(); rg.rotation.y = rot; building.add(rg);
+  if (d.roof === "pitched" && (d.footprint === "bar" || d.footprint === "tower")) {
+    const L = Math.max(...xs) - Math.min(...xs), D = Math.max(...zs) - Math.min(...zs), rh = Math.tan(35 * Math.PI / 180) * D / 2;
+    const geo = new THREE.BufferGeometry();
+    const v = [-L/2,0,-D/2, L/2,0,-D/2, L/2,rh,0, -L/2,rh,0,  -L/2,0,D/2, L/2,0,D/2, L/2,rh,0, -L/2,rh,0,  -L/2,0,-D/2,-L/2,rh,0,-L/2,0,D/2,  L/2,0,-D/2,L/2,0,D/2,L/2,rh,0];
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+    geo.setIndex([0,1,2, 0,2,3, 4,6,5, 4,7,6, 8,10,9, 11,13,12]); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, roofMats.pitched); m.position.y = topY; m.castShadow = true; rg.add(m);
+  } else {
+    const rgeo = new THREE.ExtrudeGeometry(shape, { depth: 0.35, bevelEnabled: false }); rgeo.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(rgeo, d.roof === "green" ? roofMats.green : roofMats.flat); m.position.y = topY; m.receiveShadow = true; rg.add(m);
+    if (d.pv > 0 && d.roof !== "green" && d.mode !== "keep") addPV(rg, fp, ox, oz, topY + 0.35, d.pv);
+  }
+}
+function inset(poly, s) { // axis-aligned inset (good enough for the top-floor setback)
+  const xs = poly.map(p => p[0]), zs = poly.map(p => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  return poly.map(([x, z]) => [x + Math.sign(cx - x) * s, z + Math.sign(cz - z) * s]);
+}
+function addBalconies(group, fp, ox, oz, y, d) {
+  // balconies on the long outer facades only, pushed out along each edge's outward normal
+  const o = fp.outer, n = o.length;
+  let sa = 0; for (let i = 0; i < n; i++) { const [x1, z1] = o[i], [x2, z2] = o[(i + 1) % n]; sa += x1 * z2 - x2 * z1; }
+  const sgn = sa > 0 ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    const [x1, z1] = o[i], [x2, z2] = o[(i + 1) % n], len = Math.hypot(x2 - x1, z2 - z1);
+    if (len < 18) continue;
+    const ux = (x2 - x1) / len, uz = (z2 - z1) / len, nx = uz * sgn, nz = -ux * sgn;      // outward normal
+    const cnt = Math.floor(len / 7.2), ang = Math.atan2(-uz, ux);
+    for (let k = 0; k < cnt; k++) {
+      const s = (k + 0.5) * len / cnt, cx = x1 + ux * s - ox + nx * 0.75, cz = z1 + uz * s - oz + nz * 0.75;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.18, 1.5), balcMat); b.position.set(cx, y + 0.09, cz); b.rotation.y = ang; b.castShadow = true;
+      const r = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.0, 0.04), glassMat); r.position.set(cx + nx * 0.73, y + 0.65, cz + nz * 0.73); r.rotation.y = ang;
+      group.add(b, r);
+    }
+  }
+}
+function addPV(group, fp, ox, oz, y, frac) {
+  const o = fp.outer, x0 = Math.min(...o.map(p => p[0])), x1 = Math.max(...o.map(p => p[0])), z0 = Math.min(...o.map(p => p[1])), z1 = Math.max(...o.map(p => p[1]));
+  const geo = new THREE.BoxGeometry(1.7, 0.06, 1.0);
+  const pts = [];
+  for (let x = x0 + 1.5; x < x1 - 1.5; x += 2.1) for (let z = z0 + 1.5; z < z1 - 1.5; z += 1.6) if (inside(fp, x, z)) pts.push([x, z]);
+  const n = Math.round(pts.length * frac);
+  const inst = new THREE.InstancedMesh(geo, pvMat, Math.max(1, n));
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.18, 0, 0));
+  for (let i = 0; i < n; i++) { m4.compose(new THREE.Vector3(pts[i][0] - ox, y + 0.35, pts[i][1] - oz), q, new THREE.Vector3(1, 1, 1)); inst.setMatrixAt(i, m4); }
+  inst.count = n; group.add(inst);
+}
+function inside(fp, x, z) {
+  const pip = (poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j]; if (((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi)) c = !c; } return c; };
+  return pip(fp.outer) && !fp.holes.some(pip);
+}
+
+// CO2 cloud: whole-life emissions as a volume of CO2 gas at 15 C, 1 atm (1.87 kg/m3) -> 535 m3 per tonne
+const cloudU = { t: { value: 0 }, col: { value: new THREE.Color(0xff7a3d) } };
+const cloudMat = new THREE.ShaderMaterial({
+  uniforms: cloudU, transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+  vertexShader: `varying vec3 vN; varying vec3 vP; uniform float t;
+    void main(){ vN = normalize(normalMatrix*normal); vec3 p = position;
+      float w = sin(p.x*0.08+t*0.7)*0.035 + sin(p.y*0.11-t*0.5)*0.035 + sin(p.z*0.09+t*0.9)*0.03;
+      p += normal * w * length(position); vP = p; gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.); }`,
+  fragmentShader: `varying vec3 vN; varying vec3 vP; uniform vec3 col; uniform float t;
+    void main(){ float f = pow(1.0 - abs(dot(vN, vec3(0.,0.,1.))), 2.2);
+      float n = 0.55 + 0.45*sin(vP.y*0.15 + t*0.6) * sin(vP.x*0.12 - t*0.4);
+      float churn = 0.75 + 0.25*sin(vP.y*0.06 - t*0.35) * sin(vP.x*0.05 + t*0.22) + 0.1*sin(vP.z*0.09 + t*0.5);
+      vec3 smoke = col * 0.16 + vec3(0.02);
+      vec3 rim = col * 1.35;
+      gl_FragColor = vec4(mix(smoke, rim, pow(f, 1.4)), clamp((0.34 + 0.55*f) * churn, 0.0, 0.9)); }`,
+});
+const cloud = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 5), cloudMat); scene.add(cloud);
+const dustGeo = new THREE.BufferGeometry(); const dustN = 2600, dp = new Float32Array(dustN * 3);
+for (let i = 0; i < dustN; i++) { const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.cbrt(Math.random());
+  dp.set([r * Math.sqrt(1 - u * u) * Math.cos(a), r * u, r * Math.sqrt(1 - u * u) * Math.sin(a)], i * 3); }
+dustGeo.setAttribute("position", new THREE.BufferAttribute(dp, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.9, color: 0xffb27a, transparent: true, opacity: .35, depthWrite: false, blending: THREE.AdditiveBlending }));
+scene.add(dust);
+
+// animation state: numeric params tween toward target; discrete choices switch immediately
+let dusk = 0.75, autoFrame = true, frameZoom = 0.78, snapFrame = false;
+canvas.addEventListener("pointerdown", () => { autoFrame = false; });
+canvas.addEventListener("wheel", () => { autoFrame = false; }, { passive: true });
+let cur = null, target = null;
+function targetFrom(d, r) {
+  const tonnes = Math.max(0, r.tonnes);
+  const vol = tonnes * 1000 / 1.87;                       // m3 of CO2 at 15 C
+  const radius = Math.cbrt(3 * vol / (4 * Math.PI));
+  return { length: d.length, depth: d.depth, floors: d.floors + (d.mode === "renovate" ? d.topUpFloors : 0), twist: d.twist,
+           setback: d.setback, wwr: d.wwr, radius, pass: r.pass };
+}
+function lerp(a, b, k) { return a + (b - a) * k; }
+let lastKey = "";
+let capture = false, simT = 0;
+function frame(tm) { if (capture) return; step(tm * 0.001); requestAnimationFrame(frame); }
+function step(t) {
+  controls.update();
+  if (cur && target) {
+    const k = 0.085, next = {};
+    for (const key of ["length", "depth", "floors", "twist", "setback", "wwr", "radius"]) next[key] = lerp(cur[key], target[key], k);
+    const moved = ["length", "depth", "floors", "twist", "setback"].some(q => Math.abs(next[q] - cur[q]) > 1e-3);
+    cur = Object.assign(cur, next);
+    const discrete = JSON.stringify([design.footprint, design.structure, design.facade, design.roof, design.pv, design.balconies, design.mode, design.windows, Math.round(cur.wwr * 50)]);
+    if (moved || discrete !== lastKey) {
+      rebuild({ length: cur.length, depth: cur.depth, floorsAnim: cur.floors, twist: cur.twist, setback: cur.setback, wwr: cur.wwr,
+                floors: Math.round(target.floors) - (design.mode === "renovate" ? design.topUpFloors : 0) });
+      lastKey = discrete;
+    }
+    // cloud placement: beside the building, resting on the ground
+    const rad = cur.radius;
+    const bx = -(Math.max(design.length, 20) / 2 + rad * 0.55 + 10);
+    cloud.scale.setScalar(rad); cloud.position.set(bx, rad, -rad * 0.75 - 14);
+    dust.scale.setScalar(rad * 0.95); dust.position.copy(cloud.position); dust.rotation.y = t * 0.05;
+    cloudU.col.value.set(target.pass ? 0x3fb8c9 : 0xff5a2a);
+    dust.material.color.set(target.pass ? 0x6fd6e4 : 0xff9a5a);
+    cloudU.t.value = t;
+    const p = cloud.position.clone(); p.y = rad * 1.55; p.project(camera);
+    const tag = $("#cloudtag"), r = canvas.getBoundingClientRect();
+    if (p.z < 1) { tag.hidden = false; tag.style.left = r.left + (p.x + 1) / 2 * r.width + "px"; tag.style.top = r.top + (1 - p.y) / 2 * r.height + "px";
+      tag.textContent = `${Math.round(R.tonnes).toLocaleString("en")} t CO₂ over 50 years · real volume ${Math.round(R.tonnes * 1000 / 1.87 / 1000).toLocaleString("en")} 000 m³`; }
+    // frame the camera on building + cloud: a sphere around both, distance from the vertical field of view
+    if (autoFrame) {
+      const hgt = cur.floors * design.storeyHeight;
+      const bc = new THREE.Vector3(0, hgt / 2, 0), cc = cloud.position;
+      const mid = bc.clone().lerp(cc, 0.38); mid.y = Math.max(hgt * 0.55, rad * 0.7);
+      const corners = [[-design.length / 2, 0], [design.length / 2, 0], [0, hgt]].map(([x, y]) => new THREE.Vector3(x, y, 0).distanceTo(mid));
+      const fitR = Math.max(...corners, cc.distanceTo(mid) + rad * 0.85) * 1.08;
+      const halfV = THREE.MathUtils.degToRad(camera.fov / 2), halfH = Math.atan(Math.tan(halfV) * camera.aspect);
+      const dist = fitR / Math.sin(Math.min(halfV, halfH)) * frameZoom;            // fit the narrower axis (portrait-safe)
+      const kf = snapFrame ? 1 : 0.04; snapFrame = false;
+      controls.target.lerp(mid, kf);
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      const want = controls.target.clone().add(dir.multiplyScalar(dist));
+      camera.position.lerp(want, kf);
+    }
+  }
+  composer.render();
+}
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false); composer.setSize(r.width, r.height);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+
+// ------------------------------------------------------------------ actions
+$("#reset").onclick = () => { design = Object.assign({}, CF.DEFAULT_DESIGN); set({}); };
+$("#opt").onclick = () => {
+  const best = CF.optimise(design, DB);
+  caption(`Searched ${best.evaluated.toLocaleString("en")} material combinations · best ${fmt(best.result.total)} kg CO₂e/m²/yr`);
+  set(best.design);
+};
+$("#exp").onclick = async () => {
+  const files = window.LCAbygExport.build(design, DB);
+  const zip = new JSZip(), dir = zip.folder("carbonform_lcabyg");
+  for (const [name, items] of Object.entries(files)) dir.file(name + ".json", JSON.stringify(items, null, 2));
+  const blob = await zip.generateAsync({ type: "blob" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "carbonform_lcabyg.zip"; a.click();
+  caption("LCAbyg 2023 JSON project exported · import it in LCAbyg via File → Import JSON");
+};
+let capT = null;
+function caption(s, ms = 4200) { const c = $("#caption"); c.textContent = s; c.classList.add("on"); clearTimeout(capT); capT = setTimeout(() => c.classList.remove("on"), ms); }
+
+const STORY = [
+  [{ mode: "new", footprint: "bar", structure: "concrete", facade: "brick", insulation: "eps", windows: "pvc", roof: "flat", pv: 0, heating: "district", floors: 5, twist: 0, length: 48 },
+   "A conventional concrete and brick block"],
+  [{ floors: 9, footprint: "U", length: 56 }, "Make it bigger: the carbon cloud grows with it, at its real volume"],
+  [{ structure: "timber", facade: "wood", insulation: "woodfibre", windows: "wood" }, "Swap to CLT, larch and wood fibre: the timber stores carbon up front"],
+  [{ roof: "pitched", footprint: "bar", floors: 6, length: 48 }, "Change the form and the roof"],
+  [{ twist: 3, setback: 1.5, roof: "flat", pv: 0.8, heating: "heatpump" }, "Twist it, add PV and a heat pump"],
+  [{ mode: "keep", twist: 0, setback: 0 }, "Or keep the 1970s block as it is"],
+  [{ mode: "renovate", facade: "wood", insulation: "cellulose", topUpFloors: 2, windows: "wood" }, "Renovate it and add two timber storeys"],
+  [null, "Then let the optimiser search every combination"],
+];
+let storyOn = false;
+async function playStory() {
+  if (storyOn) return; storyOn = true; controls.autoRotateSpeed = 0.9;
+  for (const [patch, text] of STORY) {
+    if (patch) set(patch); else { const best = CF.optimise(Object.assign({}, design, { mode: "new" }), DB); set(best.design); }
+    caption(text + `  ·  ${fmt(R.total)} kg CO₂e/m²/yr`, 3800);
+    await new Promise(r => setTimeout(r, 4200));
+  }
+  controls.autoRotateSpeed = 0.35; storyOn = false;
+}
+$("#story").onclick = playStory;
+window.CFApp = { set, playStory, frame: (z, snap) => { autoFrame = true; if (z) frameZoom = z; if (snap) { snapFrame = true; if (cur && target) Object.assign(cur, target); } },
+  orbit: (az, el) => { const tg = controls.target, r = camera.position.distanceTo(tg); camera.position.set(tg.x + r * Math.cos(el) * Math.sin(az), tg.y + r * Math.sin(el), tg.z + r * Math.cos(el) * Math.cos(az)); },
+  autorotate: v => { controls.autoRotate = v; },
+  startCapture: () => { capture = true; simT = 0; },
+  layout: m => { document.body.classList.toggle("cinema", m === "cinema"); resize(); },
+  captureStep: (dt) => { simT += dt; controls.autoRotateSpeed = controls.autoRotateSpeed; step(simT); },
+  setRotateSpeed: v => { controls.autoRotateSpeed = v; },
+  setCaption: (s) => { const c = $("#caption"); c.textContent = s; c.classList.toggle("on", !!s); }, get design() { return design; }, get result() { return R; }, caption, setDusk: v => { dusk = v; lastKey = ""; } };
+
+buildControls(); set({}, true); cur = targetFrom(design, R); target = targetFrom(design, R); resize(); requestAnimationFrame(frame);
+if (location.hash === "#story") setTimeout(playStory, 800);
+</script>
+</body>
+</html>
